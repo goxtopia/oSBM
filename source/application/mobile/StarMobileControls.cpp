@@ -813,28 +813,27 @@ public:
     // inversion result approaches the background and the overlay fades away.
     // (The inversion blend keys off source RGB, ignoring alpha coverage, so it
     // suits solid shapes; text is handled separately with an outline below.)
-    float op = std::clamp(m_config.opacity, 0.0f, 1.0f);
-    auto contrast = [op](float c) { return 0.5f + (c - 0.5f) * op; };
-    auto contrastColor = [&contrast](float r, float g, float b) {
-      return IM_COL32((int)std::lround(contrast(r) * 255.0f),
-                      (int)std::lround(contrast(g) * 255.0f),
-                      (int)std::lround(contrast(b) * 255.0f), 255);
-    };
-    ImU32 base = contrastColor(1.0f, 1.0f, 1.0f);
-    ImU32 fill = contrastColor(0.31f, 0.63f, 1.0f);
+    float op = std::clamp(m_config.opacity, 0.05f, 1.0f);
     float thickness = std::max(1.0f, m_config.outlineThickness);
 
-    // Text can't share the inversion blend (font coverage is stored in alpha, so
-    // inverting by RGB would flip whole glyph quads). Labels instead get a dark
-    // outline behind a light glyph so they stay legible on any background.
-    ImU32 labelColor = IM_COL32(255, 255, 255, (int)(230.0f * op));
-    ImU32 labelOutline = IM_COL32(0, 0, 0, (int)(210.0f * op));
+    // Modern layered alpha theme for mobile touch controls:
+    // Frosted obsidian background disc
+    ImU32 bgCol = IM_COL32(16, 22, 32, (int)(135.0f * op));
+    // Tactile pressed highlight fill (cyber-azure)
+    ImU32 bgHeldCol = IM_COL32(35, 80, 145, (int)(200.0f * op));
+    // Drop shadow / backing rim (guarantees contrast on bright snow, lava, or daylight)
+    ImU32 shadowCol = IM_COL32(0, 0, 0, (int)(170.0f * op));
+    // Sleek border rim (silver-white)
+    ImU32 borderCol = IM_COL32(220, 235, 255, (int)(195.0f * op));
+    // Pressed / active border highlight (neon cyan)
+    ImU32 borderHeldCol = IM_COL32(85, 205, 255, (int)(255.0f * op));
+    // Subtle inner guide ring for depth / bevel
+    ImU32 innerGuideCol = IM_COL32(255, 255, 255, (int)(45.0f * op));
+
+    ImU32 labelColor = IM_COL32(255, 255, 255, (int)(240.0f * op));
+    ImU32 labelOutline = IM_COL32(0, 0, 0, (int)(220.0f * op));
 
     std::vector<OverlayLabel> labels;
-
-    // Shape pass: switch to the inversion blend for the button geometry, then
-    // restore ImGui's default blend state afterwards.
-    draw->AddCallback(applyContrastBlendCallback, nullptr);
 
     for (auto const& element : m_elements) {
       if (!element.enabled)
@@ -845,32 +844,89 @@ public:
       float drawRadius = elementRadius / radiusScale;
 
       if (element.kind == MobileTouchElementKind::Joystick) {
-        draw->AddCircle(ip(center), drawRadius, base, 48, thickness);
-        if (m_joystickActive && m_joystickElementId == element.id)
-          draw->AddCircleFilled(ip(m_joystickCurrent), drawRadius * 0.45f, fill, 32);
+        ImVec2 c = ip(center);
+        // Base socket with drop shadow, frosted glass disc, outer rim, guide rings, and cardinal notches
+        draw->AddCircle(c, drawRadius + 1.0f, shadowCol, 48, thickness + 1.0f);
+        draw->AddCircleFilled(c, drawRadius, bgCol, 48);
+        draw->AddCircle(c, drawRadius, borderCol, 48, thickness);
+        draw->AddCircle(c, drawRadius * 0.70f, innerGuideCol, 36, 1.0f);
+        draw->AddCircle(c, drawRadius * 0.28f, innerGuideCol, 24, 1.0f);
+
+        float tIn = drawRadius * 0.78f;
+        float tOut = drawRadius * 0.94f;
+        draw->AddLine(ImVec2(c.x, c.y - tOut), ImVec2(c.x, c.y - tIn), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x, c.y + tIn), ImVec2(c.x, c.y + tOut), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x - tOut, c.y), ImVec2(c.x - tIn, c.y), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x + tIn, c.y), ImVec2(c.x + tOut, c.y), borderCol, 1.5f);
+
+        float kR = drawRadius * 0.38f;
+        if (m_joystickActive && m_joystickElementId == element.id) {
+          ImVec2 knobPos = ip(m_joystickCurrent);
+          draw->AddLine(c, knobPos, IM_COL32(75, 175, 255, (int)(150.0f * op)), 2.5f);
+          draw->AddCircleFilled(ImVec2(knobPos.x, knobPos.y + 2.0f), kR, shadowCol, 32);
+          draw->AddCircleFilled(knobPos, kR, IM_COL32(28, 44, 65, (int)(230.0f * op)), 32);
+          draw->AddCircleFilled(knobPos, kR * 0.70f, IM_COL32(48, 85, 130, (int)(240.0f * op)), 32);
+          draw->AddCircle(knobPos, kR, borderHeldCol, 32, 2.0f);
+
+          float gd = kR * 0.32f;
+          draw->AddCircleFilled(ImVec2(knobPos.x, knobPos.y - gd), 1.5f, IM_COL32(200, 230, 255, (int)(220.0f * op)), 6);
+          draw->AddCircleFilled(ImVec2(knobPos.x, knobPos.y + gd), 1.5f, IM_COL32(200, 230, 255, (int)(220.0f * op)), 6);
+          draw->AddCircleFilled(ImVec2(knobPos.x - gd, knobPos.y), 1.5f, IM_COL32(200, 230, 255, (int)(220.0f * op)), 6);
+          draw->AddCircleFilled(ImVec2(knobPos.x + gd, knobPos.y), 1.5f, IM_COL32(200, 230, 255, (int)(220.0f * op)), 6);
+        } else {
+          draw->AddCircleFilled(c, kR, IM_COL32(22, 32, 46, (int)(130.0f * op)), 32);
+          draw->AddCircle(c, kR, IM_COL32(180, 205, 235, (int)(100.0f * op)), 32, 1.2f);
+          draw->AddCircleFilled(c, 2.5f, IM_COL32(200, 230, 255, (int)(140.0f * op)), 8);
+        }
       } else if (element.kind == MobileTouchElementKind::AimJoystick) {
-        draw->AddCircle(ip(center), drawRadius, base, 48, thickness);
-        if (m_aimJoystickActive && m_aimJoystickElementId == element.id)
-          draw->AddCircleFilled(ip(m_aimJoystickCurrent), drawRadius * 0.35f, fill, 32);
+        ImVec2 c = ip(center);
+        draw->AddCircle(c, drawRadius + 1.0f, shadowCol, 48, thickness + 1.0f);
+        draw->AddCircleFilled(c, drawRadius, bgCol, 48);
+        draw->AddCircle(c, drawRadius, borderCol, 48, thickness);
+        draw->AddCircle(c, drawRadius * 0.70f, innerGuideCol, 36, 1.0f);
+
+        // Aim crosshair ticks extending outward
+        float otIn = drawRadius * 0.88f;
+        float otOut = drawRadius * 1.14f;
+        draw->AddLine(ImVec2(c.x, c.y - otOut), ImVec2(c.x, c.y - otIn), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x, c.y + otIn), ImVec2(c.x, c.y + otOut), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x - otOut, c.y), ImVec2(c.x - otIn, c.y), borderCol, 1.5f);
+        draw->AddLine(ImVec2(c.x + otIn, c.y), ImVec2(c.x + otOut, c.y), borderCol, 1.5f);
+
+        float kR = drawRadius * 0.35f;
+        if (m_aimJoystickActive && m_aimJoystickElementId == element.id) {
+          ImVec2 knobPos = ip(m_aimJoystickCurrent);
+          draw->AddLine(c, knobPos, IM_COL32(255, 120, 60, (int)(180.0f * op)), 2.5f);
+          draw->AddCircleFilled(ImVec2(knobPos.x, knobPos.y + 2.0f), kR, shadowCol, 32);
+          draw->AddCircleFilled(knobPos, kR, IM_COL32(50, 30, 30, (int)(230.0f * op)), 32);
+          draw->AddCircleFilled(knobPos, kR * 0.70f, IM_COL32(120, 45, 45, (int)(240.0f * op)), 32);
+          draw->AddCircle(knobPos, kR, IM_COL32(255, 110, 70, (int)(255.0f * op)), 32, 2.0f);
+
+          float cd = kR * 0.45f;
+          draw->AddLine(ImVec2(knobPos.x - cd, knobPos.y), ImVec2(knobPos.x + cd, knobPos.y), IM_COL32(255, 230, 200, (int)(230.0f * op)), 1.5f);
+          draw->AddLine(ImVec2(knobPos.x, knobPos.y - cd), ImVec2(knobPos.x, knobPos.y + cd), IM_COL32(255, 230, 200, (int)(230.0f * op)), 1.5f);
+        } else {
+          draw->AddCircleFilled(c, kR, IM_COL32(38, 26, 26, (int)(130.0f * op)), 32);
+          draw->AddCircle(c, kR, IM_COL32(230, 160, 140, (int)(100.0f * op)), 32, 1.2f);
+          draw->AddCircleFilled(c, 2.5f, IM_COL32(255, 180, 150, (int)(140.0f * op)), 8);
+        }
       } else if (element.kind == MobileTouchElementKind::DPad) {
-        drawDPad(draw, ip(center), drawRadius, element.id, base, fill, thickness, labels);
+        drawDPad(draw, ip(center), drawRadius, element.id, bgCol, bgHeldCol, shadowCol, borderCol, borderHeldCol, thickness, op, labels);
       } else if (element.kind == MobileTouchElementKind::PerformanceCounter) {
-        // Passive display, not a touch target: no shape, just queued text
-        // drawn in the un-blended text pass below (same as other labels).
         labels.push_back({ip(center), perfCounterText(element.perfCounterMode, fps)});
       } else {
         bool held = heldElement(element.id)
             || (element.action.kind == MobileTouchActionKind::GyroToggle && m_gyroAvailable && m_config.gyroEnabled && m_gyroRuntimeEnabled)
             || (element.action.kind == MobileTouchActionKind::AutoLockToggle && m_autoLockRuntimeActive);
-        if (element.action.kind == MobileTouchActionKind::AutoLockToggle)
-          drawAutoLockButton(draw, ip(center), drawRadius * 0.55f, held, m_autoLockRuntimeActive, element.label.utf8Ptr(), base, fill, thickness, labels);
-        else
-          drawButton(draw, ip(center), drawRadius * 0.55f, held, element.label.utf8Ptr(), base, fill, thickness, labels);
+        if (element.action.kind == MobileTouchActionKind::AutoLockToggle) {
+          drawAutoLockButton(draw, ip(center), drawRadius * 0.55f, held, m_autoLockRuntimeActive, element.label.utf8Ptr(),
+                             bgCol, bgHeldCol, shadowCol, borderCol, borderHeldCol, innerGuideCol, thickness, op, labels);
+        } else {
+          drawButton(draw, ip(center), drawRadius * 0.55f, held, element.label.utf8Ptr(),
+                     bgCol, bgHeldCol, shadowCol, borderCol, borderHeldCol, innerGuideCol, thickness, op, labels);
+        }
       }
     }
-
-    // Restore the default alpha blend before drawing text on top of the shapes.
-    draw->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
 
     for (auto const& label : labels)
       drawLabelWithOutline(draw, label.pos, label.text.utf8Ptr(), labelColor, labelOutline);
@@ -1895,50 +1951,80 @@ private:
     draw->AddText(pos, color, text);
   }
 
-  static void drawAutoLockButton(ImDrawList* draw, ImVec2 center, float radius, bool held, bool active, char const* label, ImU32 base, ImU32 fill, float thickness, std::vector<OverlayLabel>& labels) {
-    draw->AddCircle(center, radius, base, 48, thickness);
+  static void drawAutoLockButton(ImDrawList* draw, ImVec2 center, float radius, bool held, bool active, char const* label,
+                                 ImU32 bgCol, ImU32 bgHeldCol, ImU32 shadowCol, ImU32 borderCol, ImU32 borderHeldCol,
+                                 ImU32 innerGuideCol, float thickness, float op, std::vector<OverlayLabel>& labels) {
+    draw->AddCircle(center, radius + 1.0f, shadowCol, 36, thickness + 1.0f);
 
-    // 4 crosshair tick marks crossing the perimeter
-    float tickInner = radius * 0.68f;
-    float tickOuter = radius * 1.25f;
-    draw->AddLine(ImVec2(center.x, center.y - tickOuter), ImVec2(center.x, center.y - tickInner), base, thickness);
-    draw->AddLine(ImVec2(center.x, center.y + tickInner), ImVec2(center.x, center.y + tickOuter), base, thickness);
-    draw->AddLine(ImVec2(center.x - tickOuter, center.y), ImVec2(center.x - tickInner, center.y), base, thickness);
-    draw->AddLine(ImVec2(center.x + tickInner, center.y), ImVec2(center.x + tickOuter, center.y), base, thickness);
+    ImU32 activeBg = IM_COL32(180, 75, 25, (int)(185.0f * op));
+    ImU32 activeRim = IM_COL32(255, 175, 45, (int)(255.0f * op));
+    draw->AddCircleFilled(center, radius, active ? activeBg : (held ? bgHeldCol : bgCol), 36);
+    draw->AddCircle(center, radius, active ? activeRim : (held ? borderHeldCol : borderCol), 36, thickness);
+    draw->AddCircle(center, radius * 0.78f, active ? IM_COL32(255, 220, 120, (int)(120.0f * op)) : innerGuideCol, 36, 1.0f);
 
-    // Active state: fill and concentric targeting ring
+    float tickIn = radius * 0.65f;
+    float tickOut = radius * 1.25f;
+    ImU32 tickCol = active ? activeRim : (held ? borderHeldCol : borderCol);
+    draw->AddLine(ImVec2(center.x, center.y - tickOut), ImVec2(center.x, center.y - tickIn), tickCol, 1.5f);
+    draw->AddLine(ImVec2(center.x, center.y + tickIn), ImVec2(center.x, center.y + tickOut), tickCol, 1.5f);
+    draw->AddLine(ImVec2(center.x - tickOut, center.y), ImVec2(center.x - tickIn, center.y), tickCol, 1.5f);
+    draw->AddLine(ImVec2(center.x + tickIn, center.y), ImVec2(center.x + tickOut, center.y), tickCol, 1.5f);
+
     if (active) {
-      draw->AddCircleFilled(center, radius * 0.85f, fill, 32);
-      draw->AddCircle(center, radius * 0.45f, base, 32, thickness);
+      draw->AddCircle(center, radius * 0.45f, IM_COL32(255, 235, 150, (int)(200.0f * op)), 28, 1.5f);
     } else if (held) {
-      draw->AddCircleFilled(center, radius, fill, 32);
+      draw->AddCircle(center, radius * 0.58f, IM_COL32(255, 255, 255, (int)(160.0f * op)), 28, 1.5f);
     }
 
-    labels.push_back({ImVec2(center.x - radius * 0.38f, center.y - radius * 0.35f), label});
+    if (label && *label) {
+      ImVec2 tsz = ImGui::CalcTextSize(label);
+      labels.push_back({ImVec2(center.x - tsz.x * 0.5f, center.y - tsz.y * 0.5f), label});
+    }
   }
 
-  static void drawButton(ImDrawList* draw, ImVec2 center, float radius, bool held, char const* label, ImU32 base, ImU32 fill, float thickness, std::vector<OverlayLabel>& labels) {
-    draw->AddCircle(center, radius, base, 48, thickness);
+  static void drawButton(ImDrawList* draw, ImVec2 center, float radius, bool held, char const* label,
+                         ImU32 bgCol, ImU32 bgHeldCol, ImU32 shadowCol, ImU32 borderCol, ImU32 borderHeldCol,
+                         ImU32 innerGuideCol, float thickness, float op, std::vector<OverlayLabel>& labels) {
+    draw->AddCircle(center, radius + 1.0f, shadowCol, 36, thickness + 1.0f);
+    draw->AddCircleFilled(center, radius, held ? bgHeldCol : bgCol, 36);
+    draw->AddCircle(center, radius, held ? borderHeldCol : borderCol, 36, thickness);
+    draw->AddCircle(center, radius * 0.80f, innerGuideCol, 36, 1.0f);
+
     if (held)
-      draw->AddCircleFilled(center, radius, fill, 32);
-    labels.push_back({ImVec2(center.x - radius * 0.2f, center.y - radius * 0.35f), label});
+      draw->AddCircle(center, radius * 0.58f, IM_COL32(255, 255, 255, (int)(160.0f * op)), 28, 1.5f);
+
+    if (label && *label) {
+      ImVec2 tsz = ImGui::CalcTextSize(label);
+      labels.push_back({ImVec2(center.x - tsz.x * 0.5f, center.y - tsz.y * 0.5f), label});
+    }
   }
 
-  void drawDPad(ImDrawList* draw, ImVec2 center, float radius, String const& id, ImU32 base, ImU32 fill, float thickness, std::vector<OverlayLabel>& labels) const {
+  void drawDPad(ImDrawList* draw, ImVec2 center, float radius, String const& id,
+                ImU32 bgCol, ImU32 bgHeldCol, ImU32 shadowCol, ImU32 borderCol, ImU32 borderHeldCol,
+                float thickness, float op, std::vector<OverlayLabel>& labels) const {
     float arm = radius * 0.42f;
-    auto drawArm = [&](char const* suffix, ImVec2 c, char const* label) {
+    float cornerRounding = arm * 0.30f;
+
+    draw->AddRectFilled(ImVec2(center.x - arm, center.y - arm), ImVec2(center.x + arm, center.y + arm), bgCol);
+
+    auto drawArm = [&](char const* suffix, ImVec2 min, ImVec2 max, char const* arrowSymbol) {
       String heldId = id + ":" + suffix;
       bool held = m_dpadHeld.contains(heldId);
-      draw->AddRect(ImVec2(c.x - arm, c.y - arm), ImVec2(c.x + arm, c.y + arm), base, arm * 0.25f, 0, thickness);
-      if (held)
-        draw->AddRectFilled(ImVec2(c.x - arm, c.y - arm), ImVec2(c.x + arm, c.y + arm), fill, arm * 0.25f);
-      labels.push_back({ImVec2(c.x - arm * 0.22f, c.y - arm * 0.38f), label});
+      draw->AddRect(ImVec2(min.x - 1.0f, min.y - 1.0f), ImVec2(max.x + 1.0f, max.y + 1.0f), shadowCol, cornerRounding, 0, thickness + 1.0f);
+      draw->AddRectFilled(min, max, held ? bgHeldCol : bgCol, cornerRounding);
+      draw->AddRect(min, max, held ? borderHeldCol : borderCol, cornerRounding, 0, thickness);
+
+      ImVec2 armCenter((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+      ImVec2 tsz = ImGui::CalcTextSize(arrowSymbol);
+      labels.push_back({ImVec2(armCenter.x - tsz.x * 0.5f, armCenter.y - tsz.y * 0.5f), arrowSymbol});
     };
 
-    drawArm("up", ImVec2(center.x, center.y - arm * 1.25f), launcherTextStatic("touchElement.dpadUp", "W").utf8Ptr());
-    drawArm("down", ImVec2(center.x, center.y + arm * 1.25f), launcherTextStatic("touchElement.dpadDown", "S").utf8Ptr());
-    drawArm("left", ImVec2(center.x - arm * 1.25f, center.y), launcherTextStatic("touchElement.dpadLeft", "A").utf8Ptr());
-    drawArm("right", ImVec2(center.x + arm * 1.25f, center.y), launcherTextStatic("touchElement.dpadRight", "D").utf8Ptr());
+    drawArm("up", ImVec2(center.x - arm, center.y - radius), ImVec2(center.x + arm, center.y - arm * 0.8f), "▲");
+    drawArm("down", ImVec2(center.x - arm, center.y + arm * 0.8f), ImVec2(center.x + arm, center.y + radius), "▼");
+    drawArm("left", ImVec2(center.x - radius, center.y - arm), ImVec2(center.x - arm * 0.8f, center.y + arm), "◄");
+    drawArm("right", ImVec2(center.x + arm * 0.8f, center.y - arm), ImVec2(center.x + radius, center.y + arm), "►");
+
+    draw->AddCircle(center, arm * 0.5f, borderCol, 24, 1.0f);
   }
 
   Vec2U* m_windowSize;

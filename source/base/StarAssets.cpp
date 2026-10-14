@@ -44,6 +44,9 @@ namespace Star {
 namespace {
   std::mutex MobileStartupStatusMutex;
   String MobileStartupStatus;
+  // Epochs must also distinguish Assets instances: root/mod reloads can
+  // replace the manager while json()'s thread-local cache survives.
+  std::atomic<uint64_t> JsonContentEpoch{0};
 }
 
 void setMobileStartupStatus(String const& status) {
@@ -193,7 +196,8 @@ Json FramesSpecification::toJson() const {
   };
 }
 
-Assets::Assets(Settings settings, StringList assetSources) {
+Assets::Assets(Settings settings, StringList assetSources)
+  : m_jsonContentEpoch(JsonContentEpoch.fetch_add(1, std::memory_order_relaxed) + 1) {
   const char* AssetsPatchSuffix = ".patch";
   const char* AssetsPatchListSuffix = ".patchlist";
   const char* AssetsLuaPatchSuffix = ".patch.lua";
@@ -423,7 +427,7 @@ Assets::Assets(Settings settings, StringList assetSources) {
     // clear any caching that may have been trigered by load scripts as they may no longer be valid
     m_framesSpecifications.clear();
     m_assetsCache.clear();
-    m_jsonContentEpoch.fetch_add(1, std::memory_order_release);
+    m_jsonContentEpoch.store(JsonContentEpoch.fetch_add(1, std::memory_order_relaxed) + 1, std::memory_order_release);
   };
 
   List<pair<String, AssetSourcePtr>> sources;
@@ -529,7 +533,7 @@ void Assets::hotReload() const {
   m_assetsCache.clear();
   m_queue.clear();
   m_framesSpecifications.clear();
-  m_jsonContentEpoch.fetch_add(1, std::memory_order_release);
+  m_jsonContentEpoch.store(JsonContentEpoch.fetch_add(1, std::memory_order_relaxed) + 1, std::memory_order_release);
 }
 
 StringList Assets::assetSources() const {
@@ -612,13 +616,13 @@ CaseInsensitiveStringSet const& Assets::scanExtension(String const& extension) c
 }
 
 Json Assets::json(String const& path) const {
-#ifdef STAR_SYSTEM_SWITCH
+#if defined(STAR_SYSTEM_SWITCH) || defined(STAR_SYSTEM_ANDROID)
   // Per-thread memoization of json lookups. The sim worker, server world
   // thread and main thread all funnel frequent, highly repetitive config
   // lookups through here; each one otherwise takes the exclusive assets
-  // mutex, whose lock/unlock is an emulated futex syscall under Ryujinx and
-  // measurably convoys all three threads. Json values are immutable and
-  // refcounted, so caching them per-thread with an epoch check is safe.
+  // mutex. This avoids contention on Android as well as the emulated futex
+  // convoy under Ryujinx. Json values are immutable and refcounted; the
+  // process-wide content epoch invalidates reloads AND manager replacements.
   struct TlJsonCache {
     uint64_t epoch = uint64_t(-1);
     HashMap<String, Json> entries;
@@ -637,7 +641,7 @@ Json Assets::json(String const& path) const {
   validatePath(components, true, false);
 
   Json result = as<JsonData>(getAsset(AssetId{AssetType::Json, std::move(components)}))->json;
-#ifdef STAR_SYSTEM_SWITCH
+#if defined(STAR_SYSTEM_SWITCH) || defined(STAR_SYSTEM_ANDROID)
   if (tlJsonCache.entries.size() >= 8192)
     tlJsonCache.entries.clear();
   tlJsonCache.entries[path] = result;

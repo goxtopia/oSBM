@@ -329,8 +329,9 @@ private:
   Settings m_settings;
 
   mutable Mutex m_assetsMutex;
-  // Bumped whenever asset CONTENT may have changed (hot reload / load
-  // scripts); invalidates the per-thread json() memoization. TTL eviction of
+  // Assigned a process-wide unique epoch at construction and whenever asset
+  // CONTENT may have changed (hot reload / load scripts); invalidates the
+  // per-thread json() memoization even across manager replacements. TTL eviction of
   // the underlying cache does NOT bump this: Json values are immutable and
   // shared, so handing out a previously-memoized one stays correct.
   mutable std::atomic<uint64_t> m_jsonContentEpoch{0};

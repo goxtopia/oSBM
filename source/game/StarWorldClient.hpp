@@ -299,6 +299,8 @@ private:
   bool m_fullBright;
   bool m_asyncLighting;
   CellularLightingCalculator m_lightingCalculator;
+  Json m_lightingParameters;
+  bool m_lightingPointAdditive = false;
   mutable CellularLightIntensityCalculator m_lightIntensityCalculator;
   ThreadFunction<void> m_lightingThread;
   

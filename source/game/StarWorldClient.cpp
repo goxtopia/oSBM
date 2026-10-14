@@ -2171,7 +2171,14 @@ void WorldClient::lightingCalc() {
   auto configuration = root.configuration();
   bool newLighting = configuration->get("newLighting").optBool().value(true);
   bool monochrome = configuration->get("monochromeLighting").toBool();
-  m_lightingCalculator.setParameters(root.assets()->json("/lighting.config:lighting").set("pointAdditive", newLighting));
+  // Keep asset hot reload and the live newLighting option working, without
+  // copying the config object and reparsing its parameters on every light pass.
+  Json parameters = root.assets()->json("/lighting.config:lighting");
+  if (parameters != m_lightingParameters || newLighting != m_lightingPointAdditive) {
+    m_lightingCalculator.setParameters(parameters.set("pointAdditive", newLighting));
+    m_lightingParameters = std::move(parameters);
+    m_lightingPointAdditive = newLighting;
+  }
   m_lightingCalculator.setMonochrome(monochrome);
   m_lightingCalculator.begin(lightRange);
   lightingTileGather();
@@ -2304,6 +2311,9 @@ void WorldClient::initWorld(WorldStartPacket const& startPacket) {
 
   m_lightingCalculator.setMonochrome(Root::singleton().configuration()->get("monochromeLighting").toBool());
   m_lightingCalculator.setParameters(assets->json("/lighting.config:lighting"));
+  // initWorld installs the raw config above; the next light pass must apply
+  // the current newLighting override even if this world uses the same config.
+  m_lightingParameters = {};
   m_lightIntensityCalculator.setParameters(assets->json("/lighting.config:intensity"));
 
   m_inWorld = true;

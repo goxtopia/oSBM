@@ -926,6 +926,14 @@ private:
     style.ItemSpacing = ImVec2(14.0f * scale, 12.0f * scale);
     style.ScrollbarSize = 28.0f * scale;
 
+    style.WindowRounding = 10.0f * scale;
+    style.ChildRounding = 8.0f * scale;
+    style.FrameRounding = 6.0f * scale;
+    style.PopupRounding = 8.0f * scale;
+    style.ScrollbarRounding = 8.0f * scale;
+    style.GrabRounding = 6.0f * scale;
+    style.TabRounding = 6.0f * scale;
+
     auto& colors = style.Colors;
     auto const& accent = m_launcherUiConfig.accentColor;
     colors[ImGuiCol_Button] = launcherColor(accent, 0.62f);
@@ -2570,21 +2578,16 @@ private:
     float radius = baseRadius * std::clamp(element.size, 0.45f, 2.4f);
     ImVec2 center(canvasMin.x + element.position[0] * canvasSize.x, canvasMin.y + element.position[1] * canvasSize.y);
 
-    // Match the in-game overlay: opaque contrast colours (the inversion blend
-    // ignores alpha) with the opacity setting remapped to a contrast strength,
-    // and the configurable outline thickness.
-    float op = std::clamp(state.touchConfig.opacity, 0.0f, 1.0f);
-    auto contrast = [op](float c) { return 0.5f + (c - 0.5f) * op; };
-    auto contrastColor = [&contrast](float r, float g, float b) {
-      return IM_COL32((int)std::lround(contrast(r) * 255.0f),
-                      (int)std::lround(contrast(g) * 255.0f),
-                      (int)std::lround(contrast(b) * 255.0f), 255);
-    };
-    ImU32 base = contrastColor(1.0f, 1.0f, 1.0f);
-    ImU32 fill = index == state.selectedTouchElement
-        ? contrastColor(0.47f, 0.75f, 1.0f)
-        : contrastColor(0.31f, 0.63f, 1.0f);
+    float op = std::clamp(state.touchConfig.opacity, 0.05f, 1.0f);
     float thickness = std::max(1.0f, state.touchConfig.outlineThickness);
+    bool selected = index == state.selectedTouchElement;
+
+    ImU32 bgCol = IM_COL32(16, 22, 32, (int)(135.0f * op));
+    ImU32 bgSelectedCol = IM_COL32(35, 80, 145, (int)(210.0f * op));
+    ImU32 shadowCol = IM_COL32(0, 0, 0, (int)(170.0f * op));
+    ImU32 borderCol = IM_COL32(220, 235, 255, (int)(195.0f * op));
+    ImU32 borderSelectedCol = IM_COL32(85, 205, 255, (int)(255.0f * op));
+    ImU32 innerGuideCol = IM_COL32(255, 255, 255, (int)(45.0f * op));
 
     ImGui::SetCursorScreenPos(ImVec2(center.x - radius, center.y - radius));
     ImGui::PushID(element.id.utf8Ptr());
@@ -2599,26 +2602,67 @@ private:
     ImGui::PopID();
 
     if (element.kind == MobileTouchElementKind::DPad) {
-      float arm = radius * 0.38f;
-      draw->AddRectFilled(ImVec2(center.x - arm, center.y - radius), ImVec2(center.x + arm, center.y + radius), fill, arm * 0.2f);
-      draw->AddRectFilled(ImVec2(center.x - radius, center.y - arm), ImVec2(center.x + radius, center.y + arm), fill, arm * 0.2f);
-      draw->AddRect(ImVec2(center.x - radius, center.y - radius), ImVec2(center.x + radius, center.y + radius), base, arm * 0.25f, 0, thickness);
-      labels.push_back({ImVec2(center.x - radius * 0.38f, center.y - radius * 0.18f), launcherText("touchElement.dpad", "D-PAD")});
+      float arm = radius * 0.42f;
+      float cornerRounding = arm * 0.30f;
+      draw->AddRectFilled(ImVec2(center.x - arm, center.y - arm), ImVec2(center.x + arm, center.y + arm), bgCol);
+      auto drawArm = [&](ImVec2 min, ImVec2 max, char const* arrowSymbol) {
+        draw->AddRect(ImVec2(min.x - 1.0f, min.y - 1.0f), ImVec2(max.x + 1.0f, max.y + 1.0f), shadowCol, cornerRounding, 0, thickness + 1.0f);
+        draw->AddRectFilled(min, max, selected ? bgSelectedCol : bgCol, cornerRounding);
+        draw->AddRect(min, max, selected ? borderSelectedCol : borderCol, cornerRounding, 0, thickness);
+        ImVec2 armCenter((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+        ImVec2 tsz = ImGui::CalcTextSize(arrowSymbol);
+        labels.push_back({ImVec2(armCenter.x - tsz.x * 0.5f, armCenter.y - tsz.y * 0.5f), arrowSymbol});
+      };
+      drawArm(ImVec2(center.x - arm, center.y - radius), ImVec2(center.x + arm, center.y - arm * 0.8f), "▲");
+      drawArm(ImVec2(center.x - arm, center.y + arm * 0.8f), ImVec2(center.x + arm, center.y + radius), "▼");
+      drawArm(ImVec2(center.x - radius, center.y - arm), ImVec2(center.x - arm * 0.8f, center.y + arm), "◄");
+      drawArm(ImVec2(center.x + arm * 0.8f, center.y - arm), ImVec2(center.x + radius, center.y + arm), "►");
+      draw->AddCircle(center, arm * 0.5f, borderCol, 24, 1.0f);
     } else if (element.kind == MobileTouchElementKind::Joystick || element.kind == MobileTouchElementKind::AimJoystick) {
-      draw->AddCircle(center, radius, base, 48, thickness);
-      draw->AddCircleFilled(center, radius * 0.34f, fill, 32);
+      bool isAim = element.kind == MobileTouchElementKind::AimJoystick;
+      draw->AddCircle(center, radius + 1.0f, shadowCol, 48, thickness + 1.0f);
+      draw->AddCircleFilled(center, radius, selected ? bgSelectedCol : bgCol, 48);
+      draw->AddCircle(center, radius, selected ? borderSelectedCol : borderCol, 48, thickness);
+      draw->AddCircle(center, radius * 0.70f, innerGuideCol, 36, 1.0f);
+      if (!isAim)
+        draw->AddCircle(center, radius * 0.28f, innerGuideCol, 24, 1.0f);
+
+      // Resting knob in center
+      float kR = radius * (isAim ? 0.35f : 0.38f);
+      draw->AddCircleFilled(center, kR, IM_COL32(22, 32, 46, (int)(130.0f * op)), 32);
+      draw->AddCircle(center, kR, selected ? borderSelectedCol : IM_COL32(180, 205, 235, (int)(100.0f * op)), 32, 1.5f);
+      draw->AddCircleFilled(center, 2.5f, IM_COL32(200, 230, 255, (int)(140.0f * op)), 8);
+
+      // Cardinal / crosshair ticks
+      float tIn = radius * (isAim ? 0.88f : 0.78f);
+      float tOut = radius * (isAim ? 1.14f : 0.94f);
+      draw->AddLine(ImVec2(center.x, center.y - tOut), ImVec2(center.x, center.y - tIn), borderCol, 1.5f);
+      draw->AddLine(ImVec2(center.x, center.y + tIn), ImVec2(center.x, center.y + tOut), borderCol, 1.5f);
+      draw->AddLine(ImVec2(center.x - tOut, center.y), ImVec2(center.x - tIn, center.y), borderCol, 1.5f);
+      draw->AddLine(ImVec2(center.x + tIn, center.y), ImVec2(center.x + tOut, center.y), borderCol, 1.5f);
     } else if (element.kind == MobileTouchElementKind::PerformanceCounter) {
-      // No shape at runtime (it's a passive display, not a touch target) --
-      // show representative placeholder text instead, so the preview looks
-      // like what actually renders in-game while positioning it.
       String placeholder = element.perfCounterMode == PerformanceCounterMode::Detailed
           ? String("60 FPS\n60.00Hz\n00512µs\n00048µs")
           : String("60 FPS");
       labels.push_back({ImVec2(center.x - radius * 0.55f, center.y - radius * 0.4f), placeholder});
     } else {
-      draw->AddCircleFilled(center, radius * 0.55f, fill, 32);
-      draw->AddCircle(center, radius * 0.55f, base, 48, thickness);
-      labels.push_back({ImVec2(center.x - radius * 0.22f, center.y - radius * 0.18f), element.label});
+      float btnRadius = radius * 0.55f;
+      draw->AddCircle(center, btnRadius + 1.0f, shadowCol, 36, thickness + 1.0f);
+      draw->AddCircleFilled(center, btnRadius, selected ? bgSelectedCol : bgCol, 36);
+      draw->AddCircle(center, btnRadius, selected ? borderSelectedCol : borderCol, 36, thickness);
+      draw->AddCircle(center, btnRadius * 0.80f, innerGuideCol, 36, 1.0f);
+      if (element.action.kind == MobileTouchActionKind::AutoLockToggle) {
+        float tickIn = btnRadius * 0.65f;
+        float tickOut = btnRadius * 1.25f;
+        draw->AddLine(ImVec2(center.x, center.y - tickOut), ImVec2(center.x, center.y - tickIn), borderCol, 1.5f);
+        draw->AddLine(ImVec2(center.x, center.y + tickIn), ImVec2(center.x, center.y + tickOut), borderCol, 1.5f);
+        draw->AddLine(ImVec2(center.x - tickOut, center.y), ImVec2(center.x - tickIn, center.y), borderCol, 1.5f);
+        draw->AddLine(ImVec2(center.x + tickIn, center.y), ImVec2(center.x + tickOut, center.y), borderCol, 1.5f);
+      }
+      if (!element.label.empty()) {
+        ImVec2 tsz = ImGui::CalcTextSize(element.label.utf8Ptr());
+        labels.push_back({ImVec2(center.x - tsz.x * 0.5f, center.y - tsz.y * 0.5f), element.label});
+      }
     }
   }
 
