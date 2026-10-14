@@ -87,6 +87,8 @@ String actionName(MobileTouchAction const& action) {
           : action.uiNavigationDirection == UiNavigationDirection::Down ? launcherTextStatic("gamepadAction.selectionDown", "Selection Down")
           : action.uiNavigationDirection == UiNavigationDirection::Left ? launcherTextStatic("gamepadAction.selectionLeft", "Selection Left")
           : launcherTextStatic("gamepadAction.selectionRight", "Selection Right");
+    case MobileTouchActionKind::AutoLockToggle:
+      return launcherTextStatic("touchAction.autoLockToggle", "Target Lock");
     default:
       return launcherTextStatic("touchAction.none", "None");
   }
@@ -148,6 +150,12 @@ MobileTouchAction uiNavigationAction(UiNavigationDirection direction) {
   MobileTouchAction action;
   action.kind = MobileTouchActionKind::UiNavigation;
   action.uiNavigationDirection = direction;
+  return action;
+}
+
+MobileTouchAction autoLockToggleAction() {
+  MobileTouchAction action;
+  action.kind = MobileTouchActionKind::AutoLockToggle;
   return action;
 }
 
@@ -213,6 +221,7 @@ std::vector<MobileTouchElement> defaultTouchElements() {
     {"shift", launcherTextStatic("touchElement.shift", "Shift"), MobileTouchElementKind::Button, false, {0.66f, 0.88f}, 0.82f, keyAction(Key::LShift), {}, {}, {}, {}},
     {"ctrl", launcherTextStatic("touchElement.ctrl", "Ctrl"), MobileTouchElementKind::Button, false, {0.58f, 0.88f}, 0.82f, keyAction(Key::LCtrl), {}, {}, {}, {}},
     {"gyroToggle", launcherTextStatic("touchElement.gyro", "Gyro"), MobileTouchElementKind::Button, false, {0.74f, 0.88f}, 0.82f, gyroToggleAction(), {}, {}, {}, {}, MobileTouchPressMode::SinglePress},
+    {"autoLock", launcherTextStatic("touchElement.autoLock", "Lock"), MobileTouchElementKind::Button, true, {0.80f, 0.46f}, 0.86f, autoLockToggleAction(), {}, {}, {}, {}, MobileTouchPressMode::SinglePress},
     {"dpad", launcherTextStatic("touchElement.dpad", "D-PAD"), MobileTouchElementKind::DPad, false, {0.16f, 0.74f}, 1.05f, keyAction(Key::Space),
       keyAction(Key::W), keyAction(Key::S), keyAction(Key::A), keyAction(Key::D)},
     {"perfCounter", launcherTextStatic("touchElement.perfCounter", "Perf"), MobileTouchElementKind::PerformanceCounter, false, {0.02f, 0.98f}, 1.0f, noneAction(), {}, {}, {}, {}}
@@ -331,6 +340,8 @@ Json jsonFromTouchAction(MobileTouchAction const& action) {
     return JsonObject{{"type", "inventoryWheel"}};
   if (action.kind == MobileTouchActionKind::UiNavigation)
     return JsonObject{{"type", "uiNavigation"}, {"direction", UiNavigationDirectionNames.getRight(action.uiNavigationDirection)}};
+  if (action.kind == MobileTouchActionKind::AutoLockToggle)
+    return JsonObject{{"type", "autoLockToggle"}};
   if (action.kind == MobileTouchActionKind::None)
     return JsonObject{{"type", "none"}};
   return JsonObject{{"type", "key"}, {"key", KeyNames.getRight(action.key)}};
@@ -356,6 +367,8 @@ MobileTouchAction touchActionFromJson(Json const& json, MobileTouchAction def) {
     return inventoryWheelAction();
   if (type.equals("uiNavigation", String::CaseInsensitive) || type.equals("selection", String::CaseInsensitive))
     return uiNavigationAction(UiNavigationDirectionNames.valueLeft(json.getString("direction", UiNavigationDirectionNames.getRight(def.uiNavigationDirection)), def.uiNavigationDirection));
+  if (type.equals("autoLockToggle", String::CaseInsensitive) || type.equals("autoLock", String::CaseInsensitive))
+    return autoLockToggleAction();
   if (type.equals("none", String::CaseInsensitive))
     return noneAction();
   auto keyName = json.getString("key", KeyNames.getRight(def.key));
@@ -847,8 +860,12 @@ public:
         labels.push_back({ip(center), perfCounterText(element.perfCounterMode, fps)});
       } else {
         bool held = heldElement(element.id)
-            || (element.action.kind == MobileTouchActionKind::GyroToggle && m_gyroAvailable && m_config.gyroEnabled && m_gyroRuntimeEnabled);
-        drawButton(draw, ip(center), drawRadius * 0.55f, held, element.label.utf8Ptr(), base, fill, thickness, labels);
+            || (element.action.kind == MobileTouchActionKind::GyroToggle && m_gyroAvailable && m_config.gyroEnabled && m_gyroRuntimeEnabled)
+            || (element.action.kind == MobileTouchActionKind::AutoLockToggle && m_autoLockRuntimeActive);
+        if (element.action.kind == MobileTouchActionKind::AutoLockToggle)
+          drawAutoLockButton(draw, ip(center), drawRadius * 0.55f, held, m_autoLockRuntimeActive, element.label.utf8Ptr(), base, fill, thickness, labels);
+        else
+          drawButton(draw, ip(center), drawRadius * 0.55f, held, element.label.utf8Ptr(), base, fill, thickness, labels);
       }
     }
 
@@ -1561,6 +1578,11 @@ private:
       }
       return;
     }
+    if (element.action.kind == MobileTouchActionKind::AutoLockToggle) {
+      m_autoLockRuntimeActive = !m_autoLockRuntimeActive;
+      emitEvent(AutoLockToggleEvent{m_autoLockRuntimeActive});
+      return;
+    }
 
     if (element.pressMode == MobileTouchPressMode::Toggle) {
       if (m_toggledElements.contains(element.id)) {
@@ -1612,11 +1634,16 @@ private:
       }
       return;
     }
+    if (action.kind == MobileTouchActionKind::AutoLockToggle) {
+      m_autoLockRuntimeActive = !m_autoLockRuntimeActive;
+      emitEvent(AutoLockToggleEvent{m_autoLockRuntimeActive});
+      return;
+    }
     setAction(action, owner, true);
   }
 
   void releaseDirectGestureAction(MobileTouchAction const& action, char const* owner) {
-    if (action.kind == MobileTouchActionKind::GyroToggle)
+    if (action.kind == MobileTouchActionKind::GyroToggle || action.kind == MobileTouchActionKind::AutoLockToggle)
       return;
     setAction(action, owner, false);
   }
@@ -1694,6 +1721,9 @@ private:
     } else if (desired && action.kind == MobileTouchActionKind::MouseWheelDown) {
       syncVirtualAimCursor(false, m_config.joystickAimCursorEnabled);
       emitEvent(MouseWheelEvent{MouseWheel::Down, mouseActionPosition()});
+    } else if (desired && action.kind == MobileTouchActionKind::AutoLockToggle) {
+      m_autoLockRuntimeActive = !m_autoLockRuntimeActive;
+      emitEvent(AutoLockToggleEvent{m_autoLockRuntimeActive});
     }
   }
 
@@ -1865,6 +1895,28 @@ private:
     draw->AddText(pos, color, text);
   }
 
+  static void drawAutoLockButton(ImDrawList* draw, ImVec2 center, float radius, bool held, bool active, char const* label, ImU32 base, ImU32 fill, float thickness, std::vector<OverlayLabel>& labels) {
+    draw->AddCircle(center, radius, base, 48, thickness);
+
+    // 4 crosshair tick marks crossing the perimeter
+    float tickInner = radius * 0.68f;
+    float tickOuter = radius * 1.25f;
+    draw->AddLine(ImVec2(center.x, center.y - tickOuter), ImVec2(center.x, center.y - tickInner), base, thickness);
+    draw->AddLine(ImVec2(center.x, center.y + tickInner), ImVec2(center.x, center.y + tickOuter), base, thickness);
+    draw->AddLine(ImVec2(center.x - tickOuter, center.y), ImVec2(center.x - tickInner, center.y), base, thickness);
+    draw->AddLine(ImVec2(center.x + tickInner, center.y), ImVec2(center.x + tickOuter, center.y), base, thickness);
+
+    // Active state: fill and concentric targeting ring
+    if (active) {
+      draw->AddCircleFilled(center, radius * 0.85f, fill, 32);
+      draw->AddCircle(center, radius * 0.45f, base, 32, thickness);
+    } else if (held) {
+      draw->AddCircleFilled(center, radius, fill, 32);
+    }
+
+    labels.push_back({ImVec2(center.x - radius * 0.38f, center.y - radius * 0.35f), label});
+  }
+
   static void drawButton(ImDrawList* draw, ImVec2 center, float radius, bool held, char const* label, ImU32 base, ImU32 fill, float thickness, std::vector<OverlayLabel>& labels) {
     draw->AddCircle(center, radius, base, 48, thickness);
     if (held)
@@ -1939,6 +1991,7 @@ private:
   std::array<float, 3> m_gyroInput{};
   bool m_hasGyroInput = false;
   bool m_gyroRuntimeEnabled = false;
+  bool m_autoLockRuntimeActive = false;
   int64_t m_lastGyroInputMs = 0;
   int64_t m_lastGyroFrameMs = 0;
   SDL_DisplayOrientation m_gyroOrientation = SDL_ORIENTATION_UNKNOWN;
@@ -2361,6 +2414,9 @@ private:
         closeActionWheel(true);
     } else if (desired && action.kind == MobileTouchActionKind::UiNavigation) {
       emitEvent(UiNavigationEvent{action.uiNavigationDirection});
+    } else if (desired && action.kind == MobileTouchActionKind::AutoLockToggle) {
+      m_autoLockRuntimeActive = !m_autoLockRuntimeActive;
+      emitEvent(AutoLockToggleEvent{m_autoLockRuntimeActive});
     }
   }
 
@@ -2482,6 +2538,7 @@ private:
   Vec2F m_rightStick;
   Vec2F m_cursorPosition;
   int64_t m_lastAimFrameMs = 0;
+  bool m_autoLockRuntimeActive = false;
   StringSet m_heldButtons;
   StringSet m_toggledButtons;
   bool m_actionWheelActive = false;

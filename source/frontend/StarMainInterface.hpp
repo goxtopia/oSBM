@@ -196,6 +196,11 @@ private:
   bool overlayClick(Vec2F const& mousePos, MouseButton mouseButton);
   bool handleActionWheelEvent(ActionWheelEvent const& event);
   bool handleDirectionalAimEvent(DirectionalAimEvent const& event);
+  bool handleAutoLockToggleEvent(AutoLockToggleEvent const& event);
+  List<EntityPtr> findEnemiesOnScreen() const;
+  void findAndLockClosestEnemy();
+  void switchTargetInDirection(Vec2F const& dir);
+  void renderAutoLockReticle();
   List<ActionWheelItem> actionWheelItems() const;
   List<ActionWheelItem> inventoryWheelItems() const;
   List<ActionWheelItem> activeActionWheelItems() const;
@@ -295,6 +300,12 @@ private:
   Maybe<size_t> m_actionWheelSelection;
   Vec2F m_actionWheelDirection;
   bool m_mobileDirectionalAimActive = false;
+  bool m_quickInteractEnabled = true;
+  bool m_quickInteracted = false;
+  bool m_autoLockEnabled = true;
+  bool m_autoLockActive = false;
+  EntityId m_lockedTargetEntityId{NullEntityId};
+  float m_targetSwitchCooldown = 0.0f;
 
   String m_lastCommand;
 

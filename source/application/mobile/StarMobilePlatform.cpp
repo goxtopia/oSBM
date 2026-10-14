@@ -223,7 +223,8 @@ enum class LauncherScreen {
   TouchManager,
   GamepadManager,
   ModManager,
-  SaveManager
+  SaveManager,
+  Shortcuts
 };
 
 static int64_t const LauncherQuickStartHoldMs = 1000;
@@ -242,6 +243,9 @@ struct LauncherState {
   String locale;
   String systemLocale;
   bool uiSettingsOpen = false;
+  bool shortcutsOpen = false;
+  bool quickInteractEnabled = true;
+  bool autoLockEnabled = true;
   MobileTouchConfig touchConfig;
   std::vector<MobileTouchElement> touchElements;
   MobileGamepadConfig gamepadConfig;
@@ -1373,6 +1377,9 @@ private:
     state.gamepadConfig.joystickAimCursorEnabled = state.touchConfig.joystickAimCursorEnabled;
     state.gamepadBindings = gamepadBindingsFromConfig(config);
 
+    state.quickInteractEnabled = config.queryBool("shortcuts.quickInteract", true);
+    state.autoLockEnabled = config.queryBool("shortcuts.autoLock", true);
+
     state.canLaunch = File::isFile(state.packedPakPath);
     state.lastStatus = state.canLaunch ? launcherText("status.packedPakReady", "Using existing packed.pak") : launcherText("status.packedPakMissing", "Please import packed.pak");
   }
@@ -1406,6 +1413,7 @@ private:
       {launcherText("touchActionChoice.scrollUp", "Scroll Up"), wheelAction(true)},
       {launcherText("touchActionChoice.scrollDown", "Scroll Down"), wheelAction(false)},
       {launcherText("touchActionChoice.gyroToggle", "Gyro Toggle"), gyroToggleAction()},
+      {launcherText("touchActionChoice.autoLockToggle", "Target Lock"), autoLockToggleAction()},
       {launcherText("touchActionChoice.noAction", "No Action"), noneAction()}
     };
   }
@@ -2818,6 +2826,48 @@ private:
     ImGui::EndChild();
   }
 
+  void renderLauncherShortcuts(LauncherState& state) {
+    beginLauncherScrollArea("LauncherShortcutsScroll", state);
+
+    ImGui::TextUnformatted(launcherText("shortcuts.title", "Shortcut Operations").utf8Ptr());
+    ImGui::TextDisabled("%s", launcherText("shortcuts.description", "Mobile-optimized quick interactions and target lock for convenient touch control.").utf8Ptr());
+    ImGui::Separator();
+
+    if (ImGui::Button(launcherText("common.backToLauncher", "Back to Launcher").utf8Ptr()))
+      state.shortcutsOpen = false;
+    sameLineIfNextFits(imguiButtonWidth(launcherText("common.save", "Save").utf8Ptr()));
+    if (ImGui::Button(launcherText("common.save", "Save").utf8Ptr()))
+      persistLauncherState(state);
+
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    // Shortcut 1: Direct Tap Interaction
+    ImGui::TextUnformatted(launcherText("shortcuts.quickInteractTitle", "Shortcut 1: Direct Tap Interaction").utf8Ptr());
+    if (ImGui::Checkbox(launcherText("shortcuts.quickInteract", "Enable direct tap to interact").utf8Ptr(), &state.quickInteractEnabled))
+      persistLauncherState(state);
+    ImGui::TextDisabled("%s", launcherText("shortcuts.quickInteractHelp",
+        "Directly tap or click interactive objects (chests, switches, doors, NPCs, crafting tables) to interact without pressing 'E'.").utf8Ptr());
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    // Shortcut 2: Auto Target-Lock
+    ImGui::TextUnformatted(launcherText("shortcuts.autoLockTitle", "Shortcut 2: Auto Target-Lock & Switching").utf8Ptr());
+    if (ImGui::Checkbox(launcherText("shortcuts.autoLock", "Enable auto target-lock").utf8Ptr(), &state.autoLockEnabled))
+      persistLauncherState(state);
+    ImGui::TextDisabled("%s", launcherText("shortcuts.autoLockHelp",
+        "Toggle with the on-screen 'Lock' button to automatically lock onto the closest enemy on screen. Automatically acquires enemies entering range, and flick the virtual right joystick to cycle between all on-screen enemies.").utf8Ptr());
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    if (ImGui::Button(launcherText("shortcuts.reset", "Reset to Default").utf8Ptr())) {
+      state.quickInteractEnabled = true;
+      state.autoLockEnabled = true;
+      persistLauncherState(state);
+    }
+
+    ImGui::EndChild();
+  }
+
   void renderTouchManager(LauncherState& state) {
     bool gyroAvailable = platformGyroAvailable();
     if (!gyroAvailable)
@@ -3017,6 +3067,8 @@ private:
   LauncherScreen deriveLauncherScreen(LauncherState const& state) const {
     if (state.uiSettingsOpen)
       return LauncherScreen::UiSettings;
+    if (state.shortcutsOpen)
+      return LauncherScreen::Shortcuts;
     if (state.touchManagerOpen && state.gamepadManagerOpen)
       return LauncherScreen::GamepadManager;
     if (state.touchManagerOpen)
@@ -3033,6 +3085,7 @@ private:
   void applyLauncherScreen(LauncherState& state, LauncherScreen screen) {
     bool touch = screen == LauncherScreen::TouchManager || screen == LauncherScreen::GamepadManager;
     state.uiSettingsOpen = screen == LauncherScreen::UiSettings;
+    state.shortcutsOpen = screen == LauncherScreen::Shortcuts;
     state.touchManagerOpen = touch;
     state.gamepadManagerOpen = screen == LauncherScreen::GamepadManager;
     state.modManagerOpen = screen == LauncherScreen::ModManager;
@@ -3284,10 +3337,12 @@ private:
       File::makeDirectoryRecursive(modsPath);
 
     bool launchPressed = false;
-    bool mainLauncherOpen = !state.uiSettingsOpen && !state.touchManagerOpen && !state.modManagerOpen && !state.saveManagerOpen;
+    bool mainLauncherOpen = !state.uiSettingsOpen && !state.shortcutsOpen && !state.touchManagerOpen && !state.modManagerOpen && !state.saveManagerOpen;
 
     if (state.uiSettingsOpen) {
       renderLauncherUiSettings(state);
+    } else if (state.shortcutsOpen) {
+      renderLauncherShortcuts(state);
     } else if (state.touchManagerOpen && state.gamepadManagerOpen) {
       renderGamepadManager(state);
     } else if (state.touchManagerOpen) {
@@ -3716,6 +3771,9 @@ private:
       sameLineIfNextFits(imguiButtonWidth(launcherText("launcher.uiSettings", "Settings").utf8Ptr()));
       if (ImGui::Button(launcherText("launcher.uiSettings", "Settings").utf8Ptr()))
         state.uiSettingsOpen = true;
+      sameLineIfNextFits(imguiButtonWidth(launcherText("launcher.shortcuts", "Shortcuts").utf8Ptr()));
+      if (ImGui::Button(launcherText("launcher.shortcuts", "Shortcuts").utf8Ptr()))
+        state.shortcutsOpen = true;
       sameLineIfNextFits(imguiButtonWidth(launcherText("launcher.touchControls", "Controls/Overlay").utf8Ptr()));
       if (ImGui::Button(launcherText("launcher.touchControls", "Controls/Overlay").utf8Ptr())) {
         state.touchManagerOpen = true;
@@ -3843,6 +3901,10 @@ private:
       {"display", JsonObject{
         {"fullscreenRender", m_fullscreenRender}
       }},
+      {"shortcuts", JsonObject{
+        {"quickInteract", state.quickInteractEnabled},
+        {"autoLock", state.autoLockEnabled}
+      }},
       {"gamepad", JsonObject{
         {"enabled", state.gamepadConfig.enabled},
         {"triggerThreshold", state.gamepadConfig.triggerThreshold},
@@ -3914,6 +3976,8 @@ private:
       {"defaultConfiguration", JsonObject{
         {"controllerInput", false},
         {"mobile", JsonObject{
+          {"quickInteract", state.quickInteractEnabled},
+          {"autoLock", state.autoLockEnabled},
           {"touchControls", JsonObject{
             {"enabled", state.touchConfig.enabled},
             {"directTouchGestures", state.touchConfig.directTouchGestures},

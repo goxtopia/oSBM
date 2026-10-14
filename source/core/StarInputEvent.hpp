@@ -296,6 +296,10 @@ struct DirectionalAimEvent {
   bool cursorVisible = true;
 };
 
+struct AutoLockToggleEvent {
+  bool enabled = true;
+};
+
 struct ControllerAxisEvent {
   ControllerId controller;
   ControllerAxis controllerAxis;
@@ -323,6 +327,7 @@ typedef Variant<
     UiNavigationEvent,
     ActionWheelEvent,
     DirectionalAimEvent,
+    AutoLockToggleEvent,
     ControllerAxisEvent,
     ControllerButtonDownEvent,
     ControllerButtonUpEvent>

@@ -42,6 +42,7 @@ enum class MobileTouchActionKind {
   ActionWheel,
   InventoryWheel,
   UiNavigation,
+  AutoLockToggle,
   None
 };
 
@@ -172,6 +173,7 @@ MobileTouchAction gamepadAimModeToggleAction();
 MobileTouchAction actionWheelAction();
 MobileTouchAction inventoryWheelAction();
 MobileTouchAction uiNavigationAction(UiNavigationDirection direction);
+MobileTouchAction autoLockToggleAction();
 MobileTouchAction noneAction();
 String pressModeName(MobileTouchPressMode mode);
 MobileTouchPressMode pressModeFromName(String const& name, MobileTouchPressMode def = MobileTouchPressMode::Hold);

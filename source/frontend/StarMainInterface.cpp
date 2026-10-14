@@ -33,6 +33,8 @@
 #include "StarPlayer.hpp"
 #include "StarPlayerLog.hpp"
 #include "StarMonster.hpp"
+#include "StarNpc.hpp"
+#include "StarDamageBarEntity.hpp"
 #include "StarItemDrop.hpp"
 #include "StarAssets.hpp"
 #include "StarPlayerInventory.hpp"
@@ -124,6 +126,11 @@ MainInterface::MainInterface(UniverseClientPtr client, WorldPainterPtr painter, 
   m_debugMapClearTimer = GameTimer(m_config->debugMapClearTime);
 
   m_stickyTargetingTimer = GameTimer(m_config->monsterHealthBarTime);
+
+  if (auto rootConfig = Root::singleton().configuration()) {
+    m_quickInteractEnabled = rootConfig->getPath("mobile.quickInteract").optBool().value(true);
+    m_autoLockEnabled = rootConfig->getPath("mobile.autoLock").optBool().value(true);
+  }
 
   m_inventoryWindow = make_shared<InventoryPane>(this, m_client->mainPlayer(), m_containerInteractor);
   m_paneManager.registerPane(MainInterfacePanes::Inventory, PaneLayer::Window, m_inventoryWindow, [this](PanePtr const&) {
@@ -335,6 +342,9 @@ bool MainInterface::handleInputEvent(InputEvent const& event) {
   if (auto directionalAim = event.ptr<DirectionalAimEvent>())
     return handleDirectionalAimEvent(*directionalAim);
 
+  if (auto autoLock = event.ptr<AutoLockToggleEvent>())
+    return handleAutoLockToggleEvent(*autoLock);
+
   InputEvent effectiveEvent = event;
   if (m_mobileDirectionalAimActive) {
     if (auto mouseDown = event.ptr<MouseButtonDownEvent>())
@@ -433,16 +443,31 @@ bool MainInterface::handleInputEvent(InputEvent const& event) {
     && overlayClick(mouseDown->mousePosition, mouseDown->mouseButton)) {
       return true;
     } else {
-      if (mouseButton == MouseButton::Left)
+      if (mouseButton == MouseButton::Left) {
+        if (m_quickInteractEnabled && player->canUseTool()) {
+          Vec2F worldClickPos = m_worldPainter->camera().screenToWorld(mouseDown->mousePosition);
+          if (auto entity = m_client->worldClient()->getInteractiveInRange(worldClickPos, player->isAdmin() ? worldClickPos : player->position(), player->interactRadius())) {
+            if (player->isAdmin() || m_client->worldClient()->canReachEntity(player->position(), player->interactRadius(), entity->entityId())) {
+              player->interactWithEntity(entity);
+              m_quickInteracted = true;
+              return true;
+            }
+          }
+        }
         player->beginPrimaryFire();
+      }
       if (mouseButton == MouseButton::Right)
         player->beginAltFire();
       if (mouseButton == MouseButton::Middle)
         player->beginTrigger();
     }
   } else if (auto mouseUp = effectiveEvent.ptr<MouseButtonUpEvent>()) {
-    if (mouseUp->mouseButton == MouseButton::Left)
-      player->endPrimaryFire();
+    if (mouseUp->mouseButton == MouseButton::Left) {
+      if (m_quickInteracted)
+        m_quickInteracted = false;
+      else
+        player->endPrimaryFire();
+    }
     if (mouseUp->mouseButton == MouseButton::Right)
       player->endAltFire();
     if (mouseUp->mouseButton == MouseButton::Middle)
@@ -594,8 +619,22 @@ void MainInterface::handleInteractAction(InteractAction interactAction) {
 
 void MainInterface::preUpdate(float) {
   auto player = m_client->mainPlayer();
-  if (!m_client->paused())
-    player->aim(cursorWorldPosition());
+  if (!m_client->paused()) {
+    if (m_autoLockActive && m_autoLockEnabled && m_lockedTargetEntityId != NullEntityId) {
+      if (auto world = m_client->worldClient()) {
+        if (auto target = world->entity(m_lockedTargetEntityId)) {
+          Vec2F targetWorldPos = target->position() + target->metaBoundBox().center();
+          player->aim(targetWorldPos);
+        } else {
+          player->aim(cursorWorldPosition());
+        }
+      } else {
+        player->aim(cursorWorldPosition());
+      }
+    } else {
+      player->aim(cursorWorldPosition());
+    }
+  }
 
   if (m_paneManager.topPane({PaneLayer::Window, PaneLayer::ModalWindow}))
     player->setBusyState(PlayerBusyState::Menu);
@@ -609,6 +648,40 @@ void MainInterface::update(float dt) {
   m_paneManager.update(dt);
   m_cursor.update(dt);
   m_cursorDraggingCached = (bool)m_client->mainPlayer()->inventory()->swapSlotItem();
+
+  if (m_targetSwitchCooldown > 0.0f)
+    m_targetSwitchCooldown -= dt;
+
+  if (m_autoLockActive && m_autoLockEnabled) {
+    auto world = m_client->worldClient();
+    bool targetValid = false;
+    if (world && m_lockedTargetEntityId != NullEntityId) {
+      if (auto target = world->entity(m_lockedTargetEntityId)) {
+        auto damageBar = as<DamageBarEntity>(target);
+        if (damageBar && damageBar->health() > 0.0f) {
+          Vec2F screenPos = m_worldPainter->camera().worldToScreen(target->position());
+          if (screenPos[0] >= 0.0f && screenPos[0] <= (float)windowWidth() && screenPos[1] >= 0.0f && screenPos[1] <= (float)windowHeight()) {
+            targetValid = true;
+          }
+        }
+      }
+    }
+
+    if (!targetValid)
+      findAndLockClosestEnemy();
+
+    if (world && m_lockedTargetEntityId != NullEntityId) {
+      if (auto target = world->entity(m_lockedTargetEntityId)) {
+        Vec2F targetWorldPos = target->position() + target->metaBoundBox().center();
+        Vec2F targetScreenPos = m_worldPainter->camera().worldToScreen(targetWorldPos);
+        targetScreenPos[0] = std::clamp(targetScreenPos[0], 0.0f, (float)windowWidth());
+        targetScreenPos[1] = std::clamp(targetScreenPos[1], 0.0f, (float)windowHeight());
+        m_cursorScreenIPos = Vec2I::round(m_cursorScreenPos = targetScreenPos);
+        m_cursorVisible = true;
+        m_mobileDirectionalAimActive = true;
+      }
+    }
+  }
 
   m_questLogInterface->pollDialog(&m_paneManager);
 
@@ -1865,6 +1938,9 @@ void MainInterface::updateCursor() {
 }
 
 void MainInterface::renderCursor() {
+  if (m_autoLockActive && m_autoLockEnabled && m_lockedTargetEntityId != NullEntityId)
+    renderAutoLockReticle();
+
   // if we're currently playing a cinematic, we should not render the mouse.
   if (m_cinematicOverlay && !m_cinematicOverlay->completed())
     return m_guiContext->applicationController()->setCursorVisible(false);
@@ -2027,6 +2103,12 @@ bool MainInterface::handleActionWheelEvent(ActionWheelEvent const& event) {
 }
 
 bool MainInterface::handleDirectionalAimEvent(DirectionalAimEvent const& event) {
+  if (m_autoLockActive && m_autoLockEnabled) {
+    if (event.direction.magnitudeSquared() > 0.16f)
+      switchTargetInDirection(event.direction);
+    return true;
+  }
+
   auto player = m_client->mainPlayer();
   Vec2F anchor = m_worldPainter->camera().worldToScreen(player->position());
   Vec2F target = anchor + event.direction * event.radius;
@@ -2215,4 +2297,313 @@ void MainInterface::displayScriptPane(ScriptPanePtr& scriptPane, EntityId source
   }
 }
 
+bool MainInterface::handleAutoLockToggleEvent(AutoLockToggleEvent const& event) {
+  if (!m_autoLockEnabled) {
+    m_autoLockActive = false;
+    m_lockedTargetEntityId = NullEntityId;
+    return true;
+  }
+  m_autoLockActive = event.enabled;
+  if (m_autoLockActive)
+    findAndLockClosestEnemy();
+  else
+    m_lockedTargetEntityId = NullEntityId;
+  return true;
 }
+
+List<EntityPtr> MainInterface::findEnemiesOnScreen() const {
+  List<EntityPtr> enemies;
+  auto player = m_client->mainPlayer();
+  auto world = m_client->worldClient();
+  if (!player || !world)
+    return enemies;
+
+  RectF screenRect = m_worldPainter->camera().worldScreenRect();
+  float winW = (float)windowWidth();
+  float winH = (float)windowHeight();
+
+  for (auto const& entity : world->query<Entity>(screenRect)) {
+    if (!entity || entity->entityId() == player->entityId())
+      continue;
+
+    auto damageBar = as<DamageBarEntity>(entity);
+    if (!damageBar || damageBar->health() <= 0.0f)
+      continue;
+
+    auto targetTeam = entity->getTeam();
+    bool isHostile = targetTeam.type == TeamType::Enemy ||
+                     targetTeam.canDamage(player->getTeam(), false) ||
+                     (player->getTeam().canDamage(targetTeam, false) &&
+                      targetTeam.type != TeamType::Passive &&
+                      targetTeam.type != TeamType::Friendly);
+    if (!isHostile)
+      continue;
+
+    Vec2F screenPos = m_worldPainter->camera().worldToScreen(entity->position());
+    if (screenPos[0] >= 0.0f && screenPos[0] <= winW && screenPos[1] >= 0.0f && screenPos[1] <= winH)
+      enemies.append(entity);
+  }
+
+  return enemies;
+}
+
+void MainInterface::findAndLockClosestEnemy() {
+  auto player = m_client->mainPlayer();
+  if (!player) {
+    m_lockedTargetEntityId = NullEntityId;
+    return;
+  }
+
+  auto enemies = findEnemiesOnScreen();
+  if (enemies.empty()) {
+    m_lockedTargetEntityId = NullEntityId;
+    return;
+  }
+
+  auto world = m_client->worldClient();
+  EntityPtr closestEnemy;
+  float closestDistSq = std::numeric_limits<float>::max();
+  Vec2F playerPos = player->position();
+
+  for (auto const& enemy : enemies) {
+    float distSq = world->geometry().diff(enemy->position(), playerPos).magnitudeSquared();
+    if (distSq < closestDistSq) {
+      closestDistSq = distSq;
+      closestEnemy = enemy;
+    }
+  }
+
+  if (closestEnemy)
+    m_lockedTargetEntityId = closestEnemy->entityId();
+  else
+    m_lockedTargetEntityId = NullEntityId;
+}
+
+void MainInterface::switchTargetInDirection(Vec2F const& dir) {
+  if (m_targetSwitchCooldown > 0.0f)
+    return;
+
+  auto enemies = findEnemiesOnScreen();
+  if (enemies.size() <= 1) {
+    if (enemies.empty())
+      m_lockedTargetEntityId = NullEntityId;
+    else
+      m_lockedTargetEntityId = enemies.first()->entityId();
+    return;
+  }
+
+  m_targetSwitchCooldown = 0.25f;
+
+  auto player = m_client->mainPlayer();
+  auto world = m_client->worldClient();
+  if (!player || !world)
+    return;
+
+  Vec2F originPos = player->position();
+  if (m_lockedTargetEntityId != NullEntityId) {
+    if (auto current = world->entity(m_lockedTargetEntityId))
+      originPos = current->position();
+  }
+
+  Vec2F normDir = dir.normalized();
+
+  EntityPtr bestCandidate;
+  float bestScore = -std::numeric_limits<float>::max();
+  bool foundDirectional = false;
+
+  for (auto const& enemy : enemies) {
+    if (enemy->entityId() == m_lockedTargetEntityId)
+      continue;
+
+    Vec2F diff = world->geometry().diff(enemy->position(), originPos);
+    float dist = diff.magnitude();
+    if (dist > 1e-4f) {
+      float alignment = (diff * normDir) / dist;
+      if (alignment > 0.2f) {
+        float score = alignment * 100.0f - dist;
+        if (score > bestScore) {
+          bestScore = score;
+          bestCandidate = enemy;
+          foundDirectional = true;
+        }
+      }
+    }
+  }
+
+  if (foundDirectional && bestCandidate) {
+    m_lockedTargetEntityId = bestCandidate->entityId();
+    return;
+  }
+
+  // Fallback: cycle to next enemy in list
+  size_t currentIndex = 0;
+  for (size_t i = 0; i < enemies.size(); ++i) {
+    if (enemies[i]->entityId() == m_lockedTargetEntityId) {
+      currentIndex = i;
+      break;
+    }
+  }
+  size_t nextIndex = (currentIndex + 1) % enemies.size();
+  m_lockedTargetEntityId = enemies[nextIndex]->entityId();
+}
+
+void MainInterface::renderAutoLockReticle() {
+  if (m_lockedTargetEntityId == NullEntityId)
+    return;
+
+  auto world = m_client->worldClient();
+  if (!world)
+    return;
+
+  EntityPtr target = world->entity(m_lockedTargetEntityId);
+  if (!target)
+    return;
+
+  // Center on target entity's meta bounding box center in screen coordinates
+  Vec2F targetCenterWorld = target->position() + target->metaBoundBox().center();
+  Vec2F c = m_worldPainter->camera().worldToScreen(targetCenterWorld);
+
+  float scale = interfaceScale();
+  float pixelRatio = m_worldPainter->camera().pixelRatio();
+
+  // Target-adaptive radius: scale according to entity dimensions
+  float halfW = target->metaBoundBox().width() * 0.5f * TilePixels * pixelRatio;
+  float halfH = target->metaBoundBox().height() * 0.5f * TilePixels * pixelRatio;
+  float baseRadius = std::max(halfW, halfH);
+  baseRadius = std::clamp(baseRadius + 6.0f * scale, 18.0f * scale, 46.0f * scale);
+
+  // Smooth breathing animation
+  float timeSec = (float)(Time::monotonicMilliseconds() % 1000000) * 0.001f;
+  float breath = std::sin(timeSec * 3.5f) * (1.5f * scale);
+  float r = baseRadius + breath;
+
+  // Inward chevrons geometry (Top, Bottom, Left, Right converging toward target center)
+  float arm = std::clamp(r * 0.40f, 7.0f * scale, 15.0f * scale);
+  float tip = std::clamp(r * 0.22f, 4.0f * scale, 8.5f * scale);
+
+  auto drawChevron = [&](Vec2F tipPt, Vec2F wingA, Vec2F wingB, Vec4B color, float width) {
+    m_guiContext->drawLine(wingA, tipPt, color, width);
+    m_guiContext->drawLine(wingB, tipPt, color, width);
+  };
+
+  // Chevrons definition:
+  // Top chevron (at c.y + r, pointing DOWN towards center)
+  Vec2F topTip = c + Vec2F(0, r - tip);
+  Vec2F topL = c + Vec2F(-arm, r);
+  Vec2F topR = c + Vec2F(arm, r);
+
+  // Bottom chevron (at c.y - r, pointing UP towards center)
+  Vec2F botTip = c + Vec2F(0, -r + tip);
+  Vec2F botL = c + Vec2F(-arm, -r);
+  Vec2F botR = c + Vec2F(arm, -r);
+
+  // Left chevron (at c.x - r, pointing RIGHT towards center)
+  Vec2F leftTip = c + Vec2F(-r + tip, 0);
+  Vec2F leftT = c + Vec2F(-r, arm);
+  Vec2F leftB = c + Vec2F(-r, -arm);
+
+  // Right chevron (at c.x + r, pointing LEFT towards center)
+  Vec2F rightTip = c + Vec2F(r - tip, 0);
+  Vec2F rightT = c + Vec2F(r, arm);
+  Vec2F rightB = c + Vec2F(r, -arm);
+
+  // Diagonal orbital ticks (45-degree corner accents)
+  float cos45 = 0.7071f;
+  float dIn = r * 0.90f;
+  float dOut = r * 1.10f;
+  Vec2F diagonals[4] = { Vec2F(1, 1), Vec2F(-1, 1), Vec2F(-1, -1), Vec2F(1, -1) };
+
+  // Center precision diamond
+  float d = 4.0f * scale;
+  Vec2F diaT = c + Vec2F(0, d);
+  Vec2F diaR = c + Vec2F(d, 0);
+  Vec2F diaB = c + Vec2F(0, -d);
+  Vec2F diaL = c + Vec2F(-d, 0);
+
+  // Pass 1: High-contrast dark shadow / backing
+  Vec4B shadowColor(8, 12, 18, 190);
+  float shadowW = 3.6f * scale;
+
+  drawChevron(topTip, topL, topR, shadowColor, shadowW);
+  drawChevron(botTip, botL, botR, shadowColor, shadowW);
+  drawChevron(leftTip, leftT, leftB, shadowColor, shadowW);
+  drawChevron(rightTip, rightT, rightB, shadowColor, shadowW);
+
+  for (auto const& diag : diagonals) {
+    Vec2F p1 = c + Vec2F(diag[0] * dIn * cos45, diag[1] * dIn * cos45);
+    Vec2F p2 = c + Vec2F(diag[0] * dOut * cos45, diag[1] * dOut * cos45);
+    m_guiContext->drawLine(p1, p2, shadowColor, shadowW);
+  }
+
+  m_guiContext->drawLine(diaT, diaR, shadowColor, shadowW);
+  m_guiContext->drawLine(diaR, diaB, shadowColor, shadowW);
+  m_guiContext->drawLine(diaB, diaL, shadowColor, shadowW);
+  m_guiContext->drawLine(diaL, diaT, shadowColor, shadowW);
+
+  // Pass 2: Sci-Fi Tactical Core (vibrant ruby / cyber-coral lock)
+  Vec4B coreColor(255, 65, 75, 240);
+  float coreW = 1.8f * scale;
+
+  drawChevron(topTip, topL, topR, coreColor, coreW);
+  drawChevron(botTip, botL, botR, coreColor, coreW);
+  drawChevron(leftTip, leftT, leftB, coreColor, coreW);
+  drawChevron(rightTip, rightT, rightB, coreColor, coreW);
+
+  for (auto const& diag : diagonals) {
+    Vec2F p1 = c + Vec2F(diag[0] * dIn * cos45, diag[1] * dIn * cos45);
+    Vec2F p2 = c + Vec2F(diag[0] * dOut * cos45, diag[1] * dOut * cos45);
+    m_guiContext->drawLine(p1, p2, coreColor, coreW);
+  }
+
+  // Pass 3: Precision Center Diamond & Accents (bright golden amber)
+  Vec4B accentColor(255, 215, 130, 255);
+  m_guiContext->drawLine(diaT, diaR, accentColor, coreW);
+  m_guiContext->drawLine(diaR, diaB, accentColor, coreW);
+  m_guiContext->drawLine(diaB, diaL, accentColor, coreW);
+  m_guiContext->drawLine(diaL, diaT, accentColor, coreW);
+
+  // Center micro cross
+  m_guiContext->drawLine(c + Vec2F(-1.5f * scale, 0), c + Vec2F(1.5f * scale, 0), accentColor, 1.2f * scale);
+  m_guiContext->drawLine(c + Vec2F(0, -1.5f * scale), c + Vec2F(0, 1.5f * scale), accentColor, 1.2f * scale);
+
+  // Integrated Mini Target Health Bar
+  if (auto damageEntity = as<DamageBarEntity>(target)) {
+    float maxHp = damageEntity->maxHealth();
+    if (maxHp > 0.0f) {
+      float hp = std::clamp(damageEntity->health(), 0.0f, maxHp);
+      float ratio = hp / maxHp;
+
+      float barW = std::clamp(r * 1.4f, 32.0f * scale, 74.0f * scale);
+      float barH = 3.5f * scale;
+      float barY = c[1] - r - 9.0f * scale;
+      float barX = c[0] - barW * 0.5f;
+
+      // Dark backing
+      m_guiContext->drawQuad(RectF(barX - 1.0f, barY - 1.0f, barX + barW + 1.0f, barY + barH + 1.0f), Vec4B(10, 15, 22, 210));
+
+      // Color smoothly graded by HP ratio: Green -> Yellow -> Red
+      Vec4B hpColor;
+      if (ratio > 0.5f) {
+        float t = (ratio - 0.5f) * 2.0f;
+        hpColor = Vec4B((uint8_t)(255 - t * 185), (uint8_t)(190 + t * 45), (uint8_t)(40 + t * 70), 240);
+      } else {
+        float t = ratio * 2.0f;
+        hpColor = Vec4B((uint8_t)(235 + t * 20), (uint8_t)(45 + t * 145), 45, 240);
+      }
+
+      float fillW = barW * ratio;
+      if (fillW > 0.5f)
+        m_guiContext->drawQuad(RectF(barX, barY, barX + fillW, barY + barH), hpColor);
+
+      // Frame outline
+      Vec4B frameColor(70, 85, 110, 190);
+      m_guiContext->drawLine(Vec2F(barX - 1, barY - 1), Vec2F(barX + barW + 1, barY - 1), frameColor, 1.0f);
+      m_guiContext->drawLine(Vec2F(barX - 1, barY + barH + 1), Vec2F(barX + barW + 1, barY + barH + 1), frameColor, 1.0f);
+      m_guiContext->drawLine(Vec2F(barX - 1, barY - 1), Vec2F(barX - 1, barY + barH + 1), frameColor, 1.0f);
+      m_guiContext->drawLine(Vec2F(barX + barW + 1, barY - 1), Vec2F(barX + barW + 1, barY + barH + 1), frameColor, 1.0f);
+    }
+  }
+}
+
+}
+
