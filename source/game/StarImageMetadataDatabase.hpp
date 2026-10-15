@@ -6,6 +6,7 @@
 #include "StarThread.hpp"
 #include "StarAssetPath.hpp"
 #include "StarTtlCache.hpp"
+#include "StarListener.hpp"
 
 namespace Star {
 
@@ -18,6 +19,8 @@ class ImageMetadataDatabase {
 public:
   ImageMetadataDatabase();
   Vec2U imageSize(AssetPath const& path) const;
+  unsigned imagePixelScale(AssetPath const& path) const;
+  Vec2F logicalImageSize(AssetPath const& path) const;
   List<Vec2I> imageSpaces(AssetPath const& path, Vec2F position, float fillLimit, bool flip) const;
   RectU nonEmptyRegion(AssetPath const& path) const;
   void cleanup() const;
@@ -28,14 +31,17 @@ private:
   static AssetPath filterProcessing(AssetPath const& path);
 
   Vec2U calculateImageSize(AssetPath const& path) const;
+  void checkReload() const;
 
   // Path, position, fillLimit, and flip
   typedef tuple<AssetPath, Vec2I, float, bool> SpacesEntry;
 
   mutable Mutex m_mutex;
   mutable HashTtlCache<AssetPath, Vec2U> m_sizeCache;
+  mutable HashTtlCache<String, unsigned> m_pixelScaleCache;
   mutable HashTtlCache<SpacesEntry, List<Vec2I>> m_spacesCache;
   mutable HashTtlCache<AssetPath, RectU> m_regionCache;
+  TrackerListenerPtr m_reloadTracker;
 };
 
 }

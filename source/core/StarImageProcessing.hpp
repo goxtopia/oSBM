@@ -139,6 +139,10 @@ typedef Variant<NullImageOperation, ErrorImageOperation, HueShiftImageOperation,
 ImageOperation imageOperationFromString(StringView string);
 String imageOperationToString(ImageOperation const& operation);
 
+// Pixel-valued directive arguments stay in logical (retail) pixels for
+// images that explicitly declare a higher density. Scale factors stay relative.
+ImageOperation imageOperationForPixelScale(ImageOperation operation, unsigned pixelScale);
+
 void parseImageOperations(StringView params, function<void(ImageOperation&&)> outputter);
 
 // Each operation is assumed to be separated by '?', with parameters

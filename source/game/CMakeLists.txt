@@ -8,6 +8,7 @@ INCLUDE_DIRECTORIES (
 
 SET (star_game_HEADERS
     StarActorMovementController.hpp
+    StarJumpGrace.hpp
     StarAiDatabase.hpp
     StarAiTypes.hpp
     StarAmbient.hpp

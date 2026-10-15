@@ -371,6 +371,13 @@ void ClientApplication::applicationInit(ApplicationControllerPtr appController) 
   Application::applicationInit(appController);
   appController->setCursorVisible(true);
   auto configuration = m_root->configuration();
+  // The mobile host reuses this Application when returning to the launcher.
+  m_touchJumpGraceTime = 0.0f;
+#ifdef STAR_PLATFORM_MOBILE
+  if (configuration->getPath("mobile.touchControls.enabled", true).toBool()
+      && configuration->getPath("mobile.touchControls.jumpGraceEnabled", true).toBool())
+    m_touchJumpGraceTime = std::clamp(configuration->getPath("mobile.touchControls.jumpGraceTime", 0.12f).toFloat(), 0.0f, 0.3f);
+#endif
   bool vsync = configuration->get("vsync").toBool();
   Vec2U windowedSize = jsonToVec2U(configuration->get("windowedResolution"));
   Vec2U fullscreenSize = jsonToVec2U(configuration->get("fullscreenResolution"));
@@ -531,6 +538,18 @@ void ClientApplication::windowChanged(WindowMode windowMode, Vec2U screenSize) {
     config->set("windowedResolution", jsonFromVec2U(screenSize));
   }
 #endif
+}
+
+bool ClientApplication::canTouchMine(Vec2F const& screenPosition) const {
+  return (m_state == MainAppState::SinglePlayer || m_state == MainAppState::MultiPlayer)
+      && m_mainInterface && m_errorScreen && m_errorScreen->accepted()
+      && m_cinematicOverlay && m_cinematicOverlay->completed()
+      && m_mainInterface->canTouchMine(screenPosition);
+}
+
+void ClientApplication::setTouchMiningTarget(Maybe<Vec2F> screenPosition) {
+  if (m_mainInterface)
+    m_mainInterface->setTouchMiningTarget(std::move(screenPosition));
 }
 
 void ClientApplication::processInput(InputEvent const& event) {
@@ -1591,6 +1610,7 @@ void ClientApplication::updateTitle(float dt) {
 
 void ClientApplication::updateRunning(float dt) {
   try {
+    m_player->movementController()->setJumpGraceTime(m_touchJumpGraceTime);
     auto& app = appController();
     auto worldClient = m_universeClient->worldClient();
 

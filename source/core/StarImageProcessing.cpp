@@ -259,6 +259,20 @@ ImageOperation imageOperationFromString(StringView string) {
   }
 }
 
+ImageOperation imageOperationForPixelScale(ImageOperation operation, unsigned pixelScale) {
+  if (pixelScale == 1)
+    return operation;
+  if (auto mask = operation.ptr<AlphaMaskImageOperation>())
+    mask->offset *= (int)pixelScale;
+  else if (auto blend = operation.ptr<BlendImageOperation>())
+    blend->offset *= (int)pixelScale;
+  else if (auto border = operation.ptr<BorderImageOperation>())
+    border->pixels *= pixelScale;
+  else if (auto crop = operation.ptr<CropImageOperation>())
+    crop->subset = RectI(crop->subset.min() * (int)pixelScale, crop->subset.max() * (int)pixelScale);
+  return operation;
+}
+
 String imageOperationToString(ImageOperation const& operation) {
   if (auto op = operation.ptr<HueShiftImageOperation>()) {
     return strf("hueshift={}", op->hueShiftAmount * 360.0f);

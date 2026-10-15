@@ -45,16 +45,20 @@ void DrawablePainter::drawDrawable(Drawable const& drawable, float scale, Vec2F 
     primitives.emplace_back(std::in_place_type_t<RenderPoly>(), poly.vertexes(), color, 0.0f);
 
   } else if (auto imagePart = drawable.part.ptr<Drawable::ImagePart>()) {
-    TexturePtr texture = m_textureGroup->loadTexture(imagePart->image);
+    unsigned pixelScale;
+    TexturePtr texture = m_textureGroup->loadTexture(imagePart->image, &pixelScale);
 
     Vec2F textureSize(texture->size());
+    Vec2F geometrySize = textureSize;
+    if (pixelScale != 1)
+      geometrySize /= (float)pixelScale;
     Mat3F transformation = imagePart->transformation;
     if (scale != 1.0f)
       transformation.scale(Vec2F::filled(scale));
     Vec2F lowerLeft  = { transformation[0][2] += screenPos.x(), transformation[1][2] += screenPos.y() };
-    Vec2F lowerRight = transformation * Vec2F(textureSize.x(), 0.f);
-    Vec2F upperRight = transformation * textureSize;
-    Vec2F upperLeft  = transformation * Vec2F(0.f, textureSize.y());
+    Vec2F lowerRight = transformation * Vec2F(geometrySize.x(), 0.f);
+    Vec2F upperRight = transformation * geometrySize;
+    Vec2F upperLeft  = transformation * Vec2F(0.f, geometrySize.y());
 
     float param1 = drawable.fullbright ? 0.0f : 1.0f;
 

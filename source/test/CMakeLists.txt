@@ -51,6 +51,7 @@ SET (star_core_tests_SOURCES
       string_test.cpp
       strong_typedef_test.cpp
       thread_test.cpp
+      touch_assist_test.cpp
       worker_pool_test.cpp
       variant_test.cpp
       vlq_test.cpp
@@ -86,3 +87,15 @@ ADD_TEST (NAME game_tests WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY} CO
 
 SET_TESTS_PROPERTIES(core_tests PROPERTIES
                      LABELS "NoAssets")
+
+# Generates its own tiny PNG/frames fixtures; no game assets or GL context.
+ADD_EXECUTABLE(sprite_tests
+  $<TARGET_OBJECTS:star_extern> $<TARGET_OBJECTS:star_core>
+  $<TARGET_OBJECTS:star_base> $<TARGET_OBJECTS:star_game>
+  gtest/gtest-all.cc core_tests_main.cpp image_pixel_scale_test.cpp
+  ../application/StarRenderer.cpp
+  ../rendering/StarAssetTextureGroup.cpp ../rendering/StarDrawablePainter.cpp)
+TARGET_INCLUDE_DIRECTORIES(sprite_tests PRIVATE ../application ../rendering)
+TARGET_LINK_LIBRARIES(sprite_tests ${STAR_EXT_LIBS})
+ADD_TEST(NAME sprite_tests COMMAND $<TARGET_FILE:sprite_tests>)
+SET_TESTS_PROPERTIES(sprite_tests PROPERTIES LABELS "NoAssets")

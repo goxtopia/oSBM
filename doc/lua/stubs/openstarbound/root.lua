@@ -4,6 +4,16 @@
 ---@class root
 root = {}
 
+--- Declared physical texels per logical pixel (1, 2 or 4).
+---@param path string
+---@return integer
+function root.imagePixelScale(path) end
+
+--- Processed image size in logical 1x pixels; imageSize stays physical.
+---@param path string
+---@return Vec2F
+function root.logicalImageSize(path) end
+
 --- Returns an array containing all assets with the specified file extension. By the way, here's a list of every file extension the game does Special Things™ for when loading assets. - Items: `item`, `liqitem`, `matitem`, `miningtool`, `flashlight`, `wiretool`, `beamaxe`, `tillingtool`, `painttool`, `harvestingtool`, `head`, `chest`, `legs`, `back`, `currency`, `consumable`, `blueprint`, `inspectiontool`, `instrument`, `thrownitem`, `unlock`, `activeitem`, `augment` - Materials: `material`, `matmod` - Liquids: `liquid` - NPCs: `npctype` - Tenants: `tenant` - Objects: `object` - Vehicles: `vehicle` - Monsters: `monstertype`, `monsterpart`, `monsterskill`, `monstercolors` - Plants: `modularstem`, `modularfoliage`, `grass`, `bush` - Projectiles: `projectile` - Particles: `particle` - Name Gen: `namesource` - AI Missions: `aimission` - Quests: `questtemplate` - Radio Messages: `radiomessages` - Spawn Types: `spawntypes` - Species: `species` - Stagehand: `stagehand` - Behaviors: `nodes`, `behavior` - Biomes: `biome`, `weather` - Terrain: `terrain` - Treasure: `treasurepools`, `treasurechests` - Codex Entries: `codex` - Collections: `collection` - Statistics: `event`, `achievement` - Status Effects: `statuseffect` - Functions: `functions`, `2functions`, `configfunctions` - Tech: `tech` - Damage: `damage` - Dances: `dance` - Effect Sources: `effectsource` - Command Macros: `macros` - Recipes: `recipe` ---
 ---@param extension string
 ---@return string[]

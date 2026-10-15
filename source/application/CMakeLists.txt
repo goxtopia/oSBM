@@ -31,6 +31,7 @@ IF (STAR_PLATFORM_MOBILE)
       StarRenderer_gles.hpp
       mobile/StarMobileAndroidGyro.hpp
       mobile/StarMobileControls.hpp
+      mobile/StarTouchHold.hpp
       mobile/StarMobileLauncherSupport.hpp
       mobile/StarMobilePlatform.hpp
       mobile/android/StarAndroidFileAccessBridge.hpp

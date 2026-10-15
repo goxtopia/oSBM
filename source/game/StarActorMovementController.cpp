@@ -626,6 +626,14 @@ bool ActorMovementController::canJump() const {
   return m_canJump.get();
 }
 
+void ActorMovementController::setJumpGraceTime(float duration) {
+  m_jumpGrace.setDuration(duration);
+}
+
+void ActorMovementController::resetJumpGrace() {
+  m_jumpGrace.reset();
+}
+
 bool ActorMovementController::jumping() const {
   return m_jumping.get();
 }
@@ -777,6 +785,7 @@ void ActorMovementController::tickMaster(float dt) {
     resetAnchorState();
 
   if (m_entityAnchor) {
+    m_jumpGrace.reset();
     m_walking.set(false);
     m_running.set(false);
     m_crouching.set(false);
@@ -917,6 +926,11 @@ void ActorMovementController::tickMaster(float dt) {
     Maybe<Direction> updatedMovingDirection;
     bool running = m_controlRun && !activeModifiers.runningSuppressed;
 
+    if (m_liquidMovement.get() || m_controlDown || m_controlFly || zeroG())
+      m_jumpGrace.reset();
+    else
+      m_jumpGrace.update(dt, onGround());
+
     if (m_controlFly) {
       Vec2F flyVelocity = *m_controlFly;
       if (flyVelocity.magnitudeSquared() != 0)
@@ -967,7 +981,7 @@ void ActorMovementController::tickMaster(float dt) {
           m_groundMovementSustainTimer = GameTimer(0);
       }
 
-      bool standingJumpable = !m_groundMovementSustainTimer.ready();
+      bool standingJumpable = !m_groundMovementSustainTimer.ready() || m_jumpGrace.available();
       bool controlJump = m_controlJump && (!activeModifiers.jumpingSuppressed || m_controlJumpAnyway);
 
       // We are doing a jump if m_reJumpTimer has run out and there has been a
@@ -983,6 +997,7 @@ void ActorMovementController::tickMaster(float dt) {
       }
 
       if (startJump) {
+        m_jumpGrace.consume();
         m_jumping.set(true);
 
         m_reJumpTimer = GameTimer(*jumpProfile.reJumpDelay);
@@ -1080,7 +1095,7 @@ void ActorMovementController::tickMaster(float dt) {
     if (m_liquidMovement.get())
       m_canJump.set(m_reJumpTimer.ready() && (!m_groundMovementSustainTimer.ready() || *activeParameters.liquidJumpProfile.multiJump));
     else
-      m_canJump.set(m_reJumpTimer.ready() && (!m_groundMovementSustainTimer.ready() || *activeParameters.airJumpProfile.multiJump));
+      m_canJump.set(m_reJumpTimer.ready() && (!m_groundMovementSustainTimer.ready() || m_jumpGrace.available() || *activeParameters.airJumpProfile.multiJump));
 #ifdef STAR_SYSTEM_SWITCH
     int64_t amT3 = Time::monotonicMicroseconds();
     s_amPre += amT1 - amT0;

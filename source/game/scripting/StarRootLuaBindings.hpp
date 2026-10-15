@@ -22,6 +22,8 @@ namespace LuaBindings {
     double evalFunction(Root* root, String const& arg1, double arg2);
     double evalFunction2(Root* root, String const& arg1, double arg2, double arg3);
     Vec2U imageSize(Root* root, String const& arg1);
+    unsigned imagePixelScale(Root* root, String const& path);
+    Vec2F logicalImageSize(Root* root, String const& path);
     List<Vec2I> imageSpaces(Root* root, String const& arg1, Vec2F const& arg2, float arg3, bool arg4);
     RectU nonEmptyRegion(Root* root, String const& arg1);
     Json npcConfig(Root* root, String const& arg1);

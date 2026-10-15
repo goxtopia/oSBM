@@ -1,8 +1,25 @@
 #include "StarImage.hpp"
 #include "StarImageScaling.hpp"
+#include "StarImagePixelScale.hpp"
 #include "StarInterpolation.hpp"
 
 namespace Star {
+
+Image rescaleImagePixels(Image const& image, unsigned sourceScale, unsigned targetScale) {
+  if (!validImagePixelScale(sourceScale) || !validImagePixelScale(targetScale))
+    throw ImageException("Image pixelScale must be 1, 2 or 4");
+  Vec2U size = Vec2U::round(Vec2F(image.size()) * (float(targetScale) / sourceScale));
+  size[0] = max(size[0], 1u);
+  size[1] = max(size[1], 1u);
+  Image result(size, image.pixelFormat());
+  for (unsigned y = 0; y < size[1]; ++y) {
+    for (unsigned x = 0; x < size[0]; ++x) {
+      result.set({x, y}, image.clamp({(int)imageReferencePixel(x, sourceScale, targetScale),
+          (int)imageReferencePixel(y, sourceScale, targetScale)}));
+    }
+  }
+  return result;
+}
 
 Image scaleNearest(Image const& srcImage, Vec2F const& scale) {
   Vec2U srcSize = srcImage.size();

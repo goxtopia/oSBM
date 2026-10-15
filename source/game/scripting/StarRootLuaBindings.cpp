@@ -42,6 +42,8 @@ LuaCallbacks LuaBindings::makeRootCallbacks() {
   callbacks.registerCallbackWithSignature<double, String, double>("evalFunction", bind(RootCallbacks::evalFunction, root, _1, _2));
   callbacks.registerCallbackWithSignature<double, String, double, double>("evalFunction2", bind(RootCallbacks::evalFunction2, root, _1, _2, _3));
   callbacks.registerCallbackWithSignature<Vec2U, String>("imageSize", bind(RootCallbacks::imageSize, root, _1));
+  callbacks.registerCallbackWithSignature<unsigned, String>("imagePixelScale", bind(RootCallbacks::imagePixelScale, root, _1));
+  callbacks.registerCallbackWithSignature<Vec2F, String>("logicalImageSize", bind(RootCallbacks::logicalImageSize, root, _1));
   callbacks.registerCallbackWithSignature<List<Vec2I>, String, Vec2F, float, bool>("imageSpaces", bind(RootCallbacks::imageSpaces, root, _1, _2, _3, _4));
   callbacks.registerCallbackWithSignature<RectU, String>("nonEmptyRegion", bind(RootCallbacks::nonEmptyRegion, root, _1));
   callbacks.registerCallbackWithSignature<Json, String>("npcConfig", bind(RootCallbacks::npcConfig, root, _1));
@@ -375,6 +377,14 @@ double LuaBindings::RootCallbacks::evalFunction2(Root* root, String const& arg1,
 
 Vec2U LuaBindings::RootCallbacks::imageSize(Root* root, String const& arg1) {
   return root->imageMetadataDatabase()->imageSize(arg1);
+}
+
+unsigned LuaBindings::RootCallbacks::imagePixelScale(Root* root, String const& path) {
+  return root->imageMetadataDatabase()->imagePixelScale(path);
+}
+
+Vec2F LuaBindings::RootCallbacks::logicalImageSize(Root* root, String const& path) {
+  return root->imageMetadataDatabase()->logicalImageSize(path);
 }
 
 List<Vec2I> LuaBindings::RootCallbacks::imageSpaces(

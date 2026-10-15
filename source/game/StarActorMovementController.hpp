@@ -4,6 +4,7 @@
 #include "StarPlatformerAStarTypes.hpp"
 #include "StarAnchorableEntity.hpp"
 #include "StarGameTimers.hpp"
+#include "StarJumpGrace.hpp"
 
 namespace Star {
 
@@ -203,6 +204,9 @@ public:
   bool flying() const;
   bool falling() const;
   bool canJump() const;
+  // Opt-in for the local touch-controlled player; other actors keep zero grace.
+  void setJumpGraceTime(float duration);
+  void resetJumpGrace();
   bool jumping() const;
   // Slightly different than onGround, in that this is sustained for a few
   // extra frames of movement before it becomes false.
@@ -334,6 +338,7 @@ private:
   GameTimer m_reJumpTimer;
   Maybe<GameTimer> m_jumpHoldTimer;
   GameTimer m_groundMovementSustainTimer;
+  JumpGrace m_jumpGrace;
 
   // Target horizontal velocity for walking / running
   float m_targetHorizontalAmbulatingVelocity;

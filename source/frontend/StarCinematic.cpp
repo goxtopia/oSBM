@@ -253,10 +253,14 @@ void Cinematic::drawDrawable(Drawable const& drawable, float drawableScale, Vec2
 
   if (drawable.isImage()) {
     auto const& imagePart = drawable.imagePart();
-    auto texture = textureGroup->loadTexture(imagePart.image);
+    unsigned pixelScale;
+    auto texture = textureGroup->loadTexture(imagePart.image, &pixelScale);
     auto size = Vec2F(texture->size());
 
-    RectF imageRect(Vec2F(), size);
+    Vec2F geometrySize = size;
+    if (pixelScale != 1)
+      geometrySize /= (float)pixelScale;
+    RectF imageRect(Vec2F(), geometrySize);
 
     Vec2F screenTranslation = drawable.position * drawableScale + drawableTranslation;
 

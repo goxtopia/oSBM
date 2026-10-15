@@ -49,6 +49,7 @@ extern "C" int  StarIosBridge_getInterfaceOrientation();
 #endif
 
 #include "mobile/StarMobileControls.hpp"
+#include "StarTouchHold.hpp"
 #include "mobile/StarMobileLauncherSupport.hpp"
 
 namespace Star {
@@ -616,6 +617,9 @@ public:
       config.gyroEnabled = false;
     if (!config.directTouchGestures && m_config.directTouchGestures)
       cancelDirectTouchGestures();
+    if (!config.miningAssistEnabled && m_config.miningAssistEnabled)
+      cancelDirectTouchGestures();
+    config.miningHoldTime = std::clamp(config.miningHoldTime, 0.15f, 1.5f);
     if (config.gyroEnabled && !m_config.gyroEnabled) {
       m_gyroRuntimeEnabled = true;
       m_lastGyroFrameMs = 0;
@@ -625,6 +629,11 @@ public:
       m_hasGyroInput = false;
     }
     m_config = config;
+  }
+
+  void setMiningCallbacks(std::function<bool(Vec2F const&)> canMine, std::function<void(Maybe<Vec2F>)> setTarget) {
+    m_canMine = std::move(canMine);
+    m_setMiningTarget = std::move(setTarget);
   }
 
   void setGyroAvailable(bool available) {
@@ -649,6 +658,7 @@ public:
   }
 
   void endFrame() {
+    updateMiningHold();
     emitActionEdges();
   }
 
@@ -702,6 +712,7 @@ public:
   }
 
   void cancelAll() {
+    stopMining();
     clearPulsedActions();
     m_macroEvents.clear();
 
@@ -942,6 +953,7 @@ private:
     Joystick,
     AimJoystick,
     Aim,
+    Mining,
     SuppressedTap,
     SecondaryHold,
     ActionButton,
@@ -957,6 +969,9 @@ private:
     MobileTouchPressMode pressMode = MobileTouchPressMode::Hold;
     int64_t downTimeMs = 0;
     bool movedTooFarForTap = false;
+    TouchHold miningHold;
+    bool miningStarted = false;
+    bool miningTriggered = false;
     // Touchpad mode (FingerRole::Aim only): the finger's raw position as of
     // the last update, used to compute the next frame's swipe delta. Kept
     // separate from currentPos, which trackTapMotion overwrites unconditionally.
@@ -1183,6 +1198,11 @@ private:
       // Quick taps in this region still become UI clicks on release.
       state.role = FingerRole::SuppressedTap;
     } else if (m_primaryHeld && m_aimFinger != finger && !m_secondaryHeld) {
+      if (auto primary = m_fingers.ptr(m_aimFinger); primary && primary->role == FingerRole::Mining) {
+        stopMining();
+        primary->role = FingerRole::Aim;
+        m_primaryPausedForSecondary = true;
+      }
       state.role = FingerRole::SecondaryHold;
       m_secondaryHeld = true;
       m_secondaryFinger = finger;
@@ -1223,7 +1243,16 @@ private:
         m_primaryTouchPos = pos;
         emitMouseMove(pos);
       }
-      pressDirectGestureAction(m_config.directTouchSingleAction, DirectTouchSingleOwner);
+      if (m_config.miningAssistEnabled
+          && m_config.directTouchGestureMode == DirectTouchGestureMode::Touchscreen
+          && !m_aimJoystickActive && m_mouseHoldCounts.empty()
+          && m_canMine && m_canMine(toInputSpace(pos))) {
+        state.role = FingerRole::Mining;
+        state.miningHold.begin(state.downTimeMs, pos[0], pos[1]);
+        m_primaryMouseHeld = false;
+      } else {
+        pressDirectGestureAction(m_config.directTouchSingleAction, DirectTouchSingleOwner);
+      }
     }
 
     m_fingers[finger] = state;
@@ -1254,6 +1283,11 @@ private:
         m_moveVec = delta / radius;
     } else if (ptr->role == FingerRole::AimJoystick) {
       updateAimJoystickFinger(*ptr, pos);
+    } else if (ptr->role == FingerRole::Mining) {
+      m_primaryTouchPos = pos;
+      if (!ptr->miningStarted)
+        ptr->miningHold.move(Time::monotonicMilliseconds(), pos[0], pos[1], tapMovementThreshold());
+      emitMouseMove(pos);
     } else if (ptr->role == FingerRole::Aim) {
       if (m_config.directTouchGestureMode == DirectTouchGestureMode::Touchpad) {
         Vec2F delta = pos - ptr->touchpadAnchor;
@@ -1309,6 +1343,18 @@ private:
         m_primaryHeld = false;
         m_aimFinger = 0;
         break;
+      case FingerRole::Mining:
+        stopMining();
+        if (tap && !ptr->miningTriggered && m_canMine && m_canMine(toInputSpace(pos))) {
+          emitMouseMove(pos);
+          if (m_config.directTouchSingleAction.kind == MobileTouchActionKind::GyroToggle)
+            pressDirectGestureAction(m_config.directTouchSingleAction, DirectTouchMiningTapOwner);
+          else
+            startPulsedAction(m_config.directTouchSingleAction, DirectTouchMiningTapOwner);
+        }
+        m_primaryHeld = false;
+        m_aimFinger = 0;
+        break;
       case FingerRole::SuppressedTap:
         if (tap)
           emitMouseClick(pos);
@@ -1353,6 +1399,8 @@ private:
   }
 
   void cancelDirectTouchGestures() {
+    stopMining();
+    cancelPulsedAction(DirectTouchMiningTapOwner);
     if (m_primaryMouseHeld) {
       releaseDirectGestureAction(m_config.directTouchSingleAction, DirectTouchSingleOwner);
       m_primaryMouseHeld = false;
@@ -1369,8 +1417,40 @@ private:
     m_secondaryFinger = 0;
 
     for (auto& pair : m_fingers)
-      if (pair.second.role == FingerRole::Aim || pair.second.role == FingerRole::SecondaryHold || pair.second.role == FingerRole::SuppressedTap)
+      if (pair.second.role == FingerRole::Aim || pair.second.role == FingerRole::Mining || pair.second.role == FingerRole::SecondaryHold || pair.second.role == FingerRole::SuppressedTap)
         pair.second.role = FingerRole::None;
+  }
+
+  void stopMining() {
+    if (m_miningTargetActive && m_setMiningTarget)
+      m_setMiningTarget({});
+    m_miningTargetActive = false;
+  }
+
+  void updateMiningHold() {
+    auto finger = m_primaryHeld ? m_fingers.ptr(m_aimFinger) : nullptr;
+    if (!finger || finger->role != FingerRole::Mining || m_secondaryHeld) {
+      stopMining();
+      return;
+    }
+    int64_t nowMs = Time::monotonicMilliseconds();
+    Vec2F position = toInputSpace(finger->currentPos);
+    if (!m_canMine || !m_canMine(position) || m_aimJoystickActive || !m_mouseHoldCounts.empty()) {
+      stopMining();
+      finger->miningStarted = false;
+      finger->miningHold.begin(nowMs, finger->currentPos[0], finger->currentPos[1]);
+      return;
+    }
+    if (!finger->miningStarted) {
+      if (!finger->miningHold.ready(nowMs, (int64_t)std::lround(m_config.miningHoldTime * 1000.0f)))
+        return;
+      finger->miningStarted = true;
+      finger->miningTriggered = true;
+    }
+    if (m_setMiningTarget) {
+      m_setMiningTarget(position);
+      m_miningTargetActive = true;
+    }
   }
 
   MobileTouchAction dpadAction(MobileTouchElement const& element, String const& direction) const {
@@ -1672,6 +1752,7 @@ private:
   // two-finger "SecondaryHold"): distinct from any element id since these
   // gestures aren't backed by a configured MobileTouchElement.
   static constexpr char const* DirectTouchSingleOwner = "directTouchSingle";
+  static constexpr char const* DirectTouchMiningTapOwner = "directTouchMiningTap";
   static constexpr char const* DirectTouchTwoFingerOwner = "directTouchTwoFinger";
 
   // Press/release for the two configurable direct-touch gesture actions.
@@ -2032,6 +2113,9 @@ private:
   [[maybe_unused]] float* m_displayScalePtr = nullptr;
   SafeAreaInsets* m_safeAreaPtr = nullptr;
   MobileTouchConfig m_config;
+  std::function<bool(Vec2F const&)> m_canMine;
+  std::function<void(Maybe<Vec2F>)> m_setMiningTarget;
+  bool m_miningTargetActive = false;
   std::vector<MobileTouchElement> m_elements = defaultTouchElements();
   bool m_gyroAvailable = true;
   List<InputEvent> m_generatedEvents;
@@ -2657,6 +2741,9 @@ MobileTouchInputAdapter::MobileTouchInputAdapter(Vec2U* windowSize, Vec2U* rende
 MobileTouchInputAdapter::~MobileTouchInputAdapter() = default;
 
 void MobileTouchInputAdapter::setConfig(MobileTouchConfig config) { m_impl->setConfig(std::move(config)); }
+void MobileTouchInputAdapter::setMiningCallbacks(std::function<bool(Vec2F const&)> canMine, std::function<void(Maybe<Vec2F>)> setTarget) {
+  m_impl->setMiningCallbacks(std::move(canMine), std::move(setTarget));
+}
 void MobileTouchInputAdapter::setGyroAvailable(bool available) { m_impl->setGyroAvailable(available); }
 void MobileTouchInputAdapter::setElements(std::vector<MobileTouchElement> elements) { m_impl->setElements(std::move(elements)); }
 void MobileTouchInputAdapter::beginFrame() { m_impl->beginFrame(); }

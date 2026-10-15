@@ -22,7 +22,8 @@ struct Drawable {
 
   struct ImagePart {
     AssetPath image;
-    // Transformation of the image in pixel space (0, 0) - (width, height) to
+    // Transformation of the image in logical pixel space (physical texels
+    // divided by the image's declared pixelScale) to
     // the final drawn space
     Mat3F transformation;
 

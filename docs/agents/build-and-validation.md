@@ -42,7 +42,7 @@ cmake --preset linux-release                                     # expensive fir
 cmake --build --preset linux-release --target starbound --parallel   # routine
 ```
 
-A build without `--target` also builds the server, utilities, and both test
+A build without `--target` also builds the server, utilities, and all test
 binaries. Running the game needs an `sbinit.config` (template:
 `scripts/linux/sbinit.config`) whose `assetDirectories` reach `assets/`, plus
 a user-supplied `packed.pak` (conventionally `assets/packed.pak`, gitignored).
@@ -50,23 +50,25 @@ a user-supplied `packed.pak` (conventionally `assets/packed.pak`, gitignored).
 ## Unit tests
 
 `BUILD_TESTING` is ON via the base preset for desktop presets and explicitly
-OFF for Android and Switch presets. Two GoogleTest binaries
+OFF for Android and Switch presets. Three GoogleTest binaries
 (`source/test/CMakeLists.txt`), both registered with ctest and executed from
 `dist/`:
 
 - `core_tests` — core-layer tests, labeled `NoAssets`; runs on a clean checkout.
+- `sprite_tests` — image density, asset processing, and Drawable geometry tests,
+  labeled `NoAssets`; generates its own PNG/frames fixtures without a GL context.
 - `game_tests` — boots a full `Root` plus a local universe
   (`StarTestUniverse.cpp`); requires real game assets reachable from `dist/`,
   which a clean checkout does not have.
 
 The test presets (`linux-release`, `windows-release`, `macos-release`,
 `macos-arm-release`) filter to the `NoAssets` label, i.e. they run
-`core_tests` only:
+`core_tests` and `sprite_tests`:
 
 ```sh
 cd source
-cmake --build --preset linux-release --target core_tests --parallel
-ctest --preset linux-release            # runs core_tests (NoAssets filter)
+cmake --build --preset linux-release --target core_tests sprite_tests --parallel
+ctest --preset linux-release            # runs both NoAssets suites
 ```
 
 List or narrow: `ctest --test-dir ../build/linux-release -N`, or run the gtest

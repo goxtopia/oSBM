@@ -1363,6 +1363,10 @@ private:
     state.touchConfig.directTouchGestures = config.queryBool("touch.directTouchGestures", false);
 #endif
     state.touchConfig.directTouchGestureMode = directTouchGestureModeFromName(config.queryString("touch.directTouchGestureMode", "touchscreen"));
+    state.touchConfig.jumpGraceEnabled = config.queryBool("touch.jumpGraceEnabled", true);
+    state.touchConfig.jumpGraceTime = std::clamp(config.queryFloat("touch.jumpGraceTime", 0.12f), 0.0f, 0.3f);
+    state.touchConfig.miningAssistEnabled = config.queryBool("touch.miningAssistEnabled", true);
+    state.touchConfig.miningHoldTime = std::clamp(config.queryFloat("touch.miningHoldTime", 0.45f), 0.15f, 1.5f);
     state.touchConfig.directTouchSingleAction = touchActionFromJson(
         config.query("touch.directTouchSingleAction", jsonFromTouchAction(state.touchConfig.directTouchSingleAction)), state.touchConfig.directTouchSingleAction);
     state.touchConfig.directTouchTwoFingerAction = touchActionFromJson(
@@ -2936,6 +2940,16 @@ private:
     ImGui::TextUnformatted(launcherText("touchManager.touchSection", "Controls").utf8Ptr());
     ImGui::Checkbox(launcherText("touchManager.enableOverlay", "Enable touch overlay").utf8Ptr(), &state.touchConfig.enabled);
     ImGui::Checkbox(launcherText("touchManager.enableDirectGestures", "Enable direct screen touch gestures").utf8Ptr(), &state.touchConfig.directTouchGestures);
+    ImGui::Checkbox(launcherText("touchManager.jumpGraceEnabled", "Enable jump grace after leaving a platform").utf8Ptr(), &state.touchConfig.jumpGraceEnabled);
+    ImGui::BeginDisabled(!state.touchConfig.jumpGraceEnabled);
+    ImGui::SliderFloat(launcherText("touchManager.jumpGraceTime", "Jump grace time (seconds)").utf8Ptr(), &state.touchConfig.jumpGraceTime, 0.0f, 0.3f, "%.2f");
+    ImGui::EndDisabled();
+    ImGui::Checkbox(launcherText("touchManager.miningAssistEnabled", "Enable long-press terrain mining").utf8Ptr(), &state.touchConfig.miningAssistEnabled);
+    ImGui::BeginDisabled(!state.touchConfig.miningAssistEnabled);
+    ImGui::SliderFloat(launcherText("touchManager.miningHoldTime", "Mining long-press time (seconds)").utf8Ptr(), &state.touchConfig.miningHoldTime, 0.15f, 1.5f, "%.2f");
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%s", launcherText("touchManager.miningAssistHint",
+        "Touchscreen mode: hold still on foreground terrain to select the Matter Manipulator and mine. Release to stop. Furniture, creatures, background walls and UI are excluded.").utf8Ptr());
     if (state.touchConfig.directTouchGestures) {
       bool touchpad = state.touchConfig.directTouchGestureMode == DirectTouchGestureMode::Touchpad;
       // Store as String, not char const*: .utf8Ptr() on a launcherText()
@@ -3925,6 +3939,10 @@ private:
         {"enabled", state.touchConfig.enabled},
         {"directTouchGestures", state.touchConfig.directTouchGestures},
         {"directTouchGestureMode", directTouchGestureModeName(state.touchConfig.directTouchGestureMode)},
+        {"jumpGraceEnabled", state.touchConfig.jumpGraceEnabled},
+        {"jumpGraceTime", state.touchConfig.jumpGraceTime},
+        {"miningAssistEnabled", state.touchConfig.miningAssistEnabled},
+        {"miningHoldTime", state.touchConfig.miningHoldTime},
         {"directTouchSingleAction", jsonFromTouchAction(state.touchConfig.directTouchSingleAction)},
         {"directTouchTwoFingerAction", jsonFromTouchAction(state.touchConfig.directTouchTwoFingerAction)},
         {"joystickAimCursorEnabled", state.touchConfig.joystickAimCursorEnabled},
@@ -4026,6 +4044,10 @@ private:
             {"enabled", state.touchConfig.enabled},
             {"directTouchGestures", state.touchConfig.directTouchGestures},
             {"directTouchGestureMode", directTouchGestureModeName(state.touchConfig.directTouchGestureMode)},
+            {"jumpGraceEnabled", state.touchConfig.jumpGraceEnabled},
+            {"jumpGraceTime", state.touchConfig.jumpGraceTime},
+            {"miningAssistEnabled", state.touchConfig.miningAssistEnabled},
+            {"miningHoldTime", state.touchConfig.miningHoldTime},
             {"directTouchSingleAction", jsonFromTouchAction(state.touchConfig.directTouchSingleAction)},
             {"directTouchTwoFingerAction", jsonFromTouchAction(state.touchConfig.directTouchTwoFingerAction)},
             {"joystickAimCursorEnabled", state.touchConfig.joystickAimCursorEnabled},
@@ -4158,6 +4180,12 @@ private:
       renderStartupScreen(getMobileStartupStatus());
       androidLogInfo("startApplication: create touch adapter");
       m_touchAdapter = make_unique<MobileTouchInputAdapter>(&m_windowSize, &m_renderCanvasSize, &m_displayScale, &m_safeArea);
+      m_touchAdapter->setMiningCallbacks(
+          [this](Vec2F const& position) { return m_application && m_application->canTouchMine(position); },
+          [this](Maybe<Vec2F> position) {
+            if (m_application)
+              m_application->setTouchMiningTarget(std::move(position));
+          });
       m_touchAdapter->setGyroAvailable(platformGyroAvailable());
       m_gamepadAdapter = make_unique<MobileGamepadInputAdapter>(&m_renderCanvasSize);
 
@@ -4177,6 +4205,10 @@ private:
         touch.directTouchGestures = cfg.queryBool("touch.directTouchGestures", false);
 #endif
         touch.directTouchGestureMode = directTouchGestureModeFromName(cfg.queryString("touch.directTouchGestureMode", "touchscreen"));
+        touch.jumpGraceEnabled = cfg.queryBool("touch.jumpGraceEnabled", true);
+        touch.jumpGraceTime = std::clamp(cfg.queryFloat("touch.jumpGraceTime", 0.12f), 0.0f, 0.3f);
+        touch.miningAssistEnabled = cfg.queryBool("touch.miningAssistEnabled", true);
+        touch.miningHoldTime = std::clamp(cfg.queryFloat("touch.miningHoldTime", 0.45f), 0.15f, 1.5f);
         touch.directTouchSingleAction = touchActionFromJson(
             cfg.query("touch.directTouchSingleAction", jsonFromTouchAction(touch.directTouchSingleAction)), touch.directTouchSingleAction);
         touch.directTouchTwoFingerAction = touchActionFromJson(
@@ -4511,6 +4543,8 @@ private:
     if (!m_application)
       return;
 
+    if (m_touchAdapter)
+      m_touchAdapter->cancelAll();
     try {
       m_application->shutdown();
     } catch (...) {
@@ -4728,11 +4762,15 @@ private:
       if (event.type == SDL_EVENT_WINDOW_RESIZED
           || event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
           || event.type == SDL_EVENT_WINDOW_SAFE_AREA_CHANGED) {
+        // A held terrain gesture must not mine a different tile using stale
+        // physical coordinates after rotation or a safe-area change.
+        m_touchAdapter->cancelAll();
         syncWindowMetrics(true);
         continue;
       }
 
       if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+        m_touchAdapter->cancelAll();
         syncWindowMetrics(true);
         continue;
       }

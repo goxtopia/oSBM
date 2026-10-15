@@ -35,6 +35,8 @@ protected:
   virtual void windowChanged(WindowMode windowMode, Vec2U screenSize) override;
 
   virtual void processInput(InputEvent const& event) override;
+  bool canTouchMine(Vec2F const& screenPosition) const override;
+  void setTouchMiningTarget(Maybe<Vec2F> screenPosition) override;
 
   virtual void update() override;
   virtual void render() override;
@@ -126,6 +128,7 @@ private:
   WorldPainterPtr m_worldPainter;
   WorldRenderData m_renderData;
   MainInterfacePtr m_mainInterface;
+  float m_touchJumpGraceTime = 0.0f;
 
 #ifdef STAR_SYSTEM_SWITCH
   // Overlapped sim pipeline (see updateRunning/render): the deferred

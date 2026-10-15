@@ -1,5 +1,8 @@
 # humanoidConfig
 
+For opt-in 2x/4x sprite density with unchanged rig/world coordinates, see
+[high-resolution sprites](high-resolution-sprites.md). Density is declared per image in `.frames`, not as a global humanoid scale.
+
 ---
 
 ## `Vec2F` headRotationCenter

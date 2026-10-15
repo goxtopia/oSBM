@@ -1,5 +1,18 @@
 # Root
 
+#### `unsigned` root.imagePixelScale(`String` path)
+
+Returns the image's explicit `.frames` pixel density: 1 (default), 2 or 4.
+Frame aliases and processing directives retain the base image's density.
+
+#### `Vec2F` root.logicalImageSize(`String` path)
+
+Returns the processed image size in logical 1x pixels. `root.imageSize` and
+`root.nonEmptyRegion` continue to return physical texel sizes/regions.
+See [high-resolution sprites](../../json/openstarbound/high-resolution-sprites.md).
+
+---
+
 The `root` table now contains extra asset bindings and bindings to return the tile variant that is used for material and matmods at any position.
 
 ---

@@ -83,6 +83,8 @@ public:
 
   // Return true if this event was consumed or should be handled elsewhere.
   bool handleInputEvent(InputEvent const& event);
+  bool canTouchMine(Vec2F const& screenPosition) const;
+  void setTouchMiningTarget(Maybe<Vec2F> screenPosition);
   // Return true if mouse / keyboard events are currently locked here
   bool inputFocus() const;
   // If input is focused, should MainInterface also accept text input events?
@@ -216,6 +218,8 @@ private:
   InterfaceCursor m_cursor;
 
   RunningState m_state{Running};
+  Maybe<Vec2F> m_touchMiningTarget;
+  bool m_touchMiningFiring = false;
 
   UniverseClientPtr m_client;
   WorldPainterPtr m_worldPainter;

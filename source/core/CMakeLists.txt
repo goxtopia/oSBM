@@ -43,6 +43,7 @@ SET (star_core_HEADERS
     StarIdMap.hpp
     StarImage.hpp
     StarImageProcessing.hpp
+    StarImagePixelScale.hpp
     StarImageScaling.hpp
     StarInputEvent.hpp
     StarInterpolation.hpp

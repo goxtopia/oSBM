@@ -45,6 +45,11 @@ public:
   // Called before update, once for every pending event.
   virtual void processInput(InputEvent const& event);
 
+  // Optional touch-assist hooks, called on the main thread between updates.
+  // Positions use the same bottom-left render-canvas space as mouse events.
+  virtual bool canTouchMine(Vec2F const& screenPosition) const;
+  virtual void setTouchMiningTarget(Maybe<Vec2F> screenPosition);
+
   // Will be called at updateRate hz, or as close as possible.
   virtual void update();
   

@@ -345,6 +345,7 @@ void Player::init(World* world, EntityId entityId, EntityMode mode) {
 
   m_tools->init(this);
   m_movementController->init(world);
+  m_movementController->resetJumpGrace();
   m_movementController->setIgnorePhysicsEntities({entityId});
   m_statusController->init(this, m_movementController.get());
   m_techController->init(this, m_movementController.get(), m_statusController.get());

@@ -33,6 +33,8 @@ struct FramesSpecification {
   Json toJson() const;
   // The full path to the .frames file from which this was loaded.
   String framesFile;
+  // Physical PNG texels per logical sprite pixel. Unmarked assets stay 1x.
+  unsigned pixelScale = 1;
   // Named sub-frames
   StringMap<RectU> frames;
   // Aliases for named sub-frames, always points to a valid frame name in the
@@ -129,6 +131,7 @@ public:
     bool shouldPersist() const override;
 
     ImageConstPtr image;
+    unsigned pixelScale = 1;
 
     // *Optional* sub-frames data for this image, only will exist when the
     // image is a top-level image and has an associated frames file.

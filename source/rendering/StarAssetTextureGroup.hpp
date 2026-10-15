@@ -20,7 +20,7 @@ public:
 
   // Load the given texture into the texture group if it is not loaded, and
   // return the texture pointer.
-  TexturePtr loadTexture(AssetPath const& imagePath);
+  TexturePtr loadTexture(AssetPath const& imagePath, unsigned* pixelScale = nullptr);
 
   // If the texture is loaded and ready, returns the texture pointer, otherwise
   // queues the texture using Assets::tryImage and returns nullptr.
@@ -37,10 +37,16 @@ private:
   // Returns the texture parameters.  If tryTexture is true, then returns none
   // if the texture is not loaded, and queues it, otherwise loads texture
   // immediately
-  TexturePtr loadTexture(AssetPath const& imagePath, bool tryTexture);
+  TexturePtr loadTexture(AssetPath const& imagePath, bool tryTexture, unsigned* pixelScale);
+
+  struct TextureEntry {
+    TexturePtr texture;
+    int64_t lastUsed;
+    unsigned pixelScale;
+  };
 
   TextureGroupPtr m_textureGroup;
-  HashMap<AssetPath, pair<TexturePtr, int64_t>> m_textureMap;
+  HashMap<AssetPath, TextureEntry> m_textureMap;
   HashMap<ImageConstPtr, TexturePtr> m_textureDeduplicationMap;
   TrackerListenerPtr m_reloadTracker;
 };

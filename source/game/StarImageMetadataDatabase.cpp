@@ -7,6 +7,7 @@
 #include "StarGameTypes.hpp"
 #include "StarRoot.hpp"
 #include "StarAssets.hpp"
+#include "StarImagePixelScale.hpp"
 
 namespace Star {
 
@@ -17,12 +18,17 @@ ImageMetadataDatabase::ImageMetadataDatabase() {
   m_sizeCache.setTimeSmear(timeSmear);
   m_spacesCache.setTimeSmear(timeSmear);
   m_regionCache.setTimeSmear(timeSmear);
+  m_pixelScaleCache.setTimeSmear(timeSmear);
   m_sizeCache.setTimeToLive(timeToLive);
   m_spacesCache.setTimeToLive(timeToLive);
   m_regionCache.setTimeToLive(timeToLive);
+  m_pixelScaleCache.setTimeToLive(timeToLive);
+  m_reloadTracker = make_shared<TrackerListener>();
+  Root::singleton().registerReloadListener(m_reloadTracker);
 }
 
 Vec2U ImageMetadataDatabase::imageSize(AssetPath const& path) const {
+  checkReload();
   MutexLocker locker(m_mutex);
   if (auto cached = m_sizeCache.ptr(path))
     return *cached;
@@ -35,7 +41,39 @@ Vec2U ImageMetadataDatabase::imageSize(AssetPath const& path) const {
   return size;
 }
 
+unsigned ImageMetadataDatabase::imagePixelScale(AssetPath const& path) const {
+  checkReload();
+  MutexLocker locker(m_mutex);
+  if (auto cached = m_pixelScaleCache.ptr(path.basePath))
+    return *cached;
+  locker.unlock();
+  auto frames = Root::singleton().assets()->imageFrames(path.basePath);
+  unsigned scale = frames ? frames->pixelScale : 1;
+  locker.lock();
+  m_pixelScaleCache.set(path.basePath, scale);
+  return scale;
+}
+
+Vec2F ImageMetadataDatabase::logicalImageSize(AssetPath const& path) const {
+  Vec2F size(imageSize(path));
+  unsigned scale = imagePixelScale(path);
+  size[0] = logicalImagePixels(size[0], scale);
+  size[1] = logicalImagePixels(size[1], scale);
+  return size;
+}
+
+void ImageMetadataDatabase::checkReload() const {
+  if (m_reloadTracker->pullTriggered()) {
+    MutexLocker locker(m_mutex);
+    m_sizeCache.clear();
+    m_pixelScaleCache.clear();
+    m_spacesCache.clear();
+    m_regionCache.clear();
+  }
+}
+
 List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F position, float fillLimit, bool flip) const {
+  checkReload();
   SpacesEntry key = make_tuple(path, Vec2I::round(position), fillLimit, flip);
 
   MutexLocker locker(m_mutex);
@@ -56,9 +94,12 @@ List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F posi
   auto image = Root::singleton().assets()->image(filteredPath);
   int imageWidth = image->width();
   int imageHeight = image->height();
+  unsigned pixelScale = imagePixelScale(filteredPath);
+  int tilePixels = (int)TilePixels * pixelScale;
 
   Vec2I min((position / TilePixels).floor());
-  Vec2I max(((Vec2F(imageWidth, imageHeight) + position) / TilePixels).ceil());
+  Vec2F logicalSize(logicalImagePixels(imageWidth, pixelScale), logicalImagePixels(imageHeight, pixelScale));
+  Vec2I max(((logicalSize + position) / TilePixels).ceil());
 
   List<Vec2I> spaces;
 
@@ -66,13 +107,13 @@ List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F posi
     for (int xspace = min[0]; xspace < max[0]; ++xspace) {
       float fillRatio = 0.0f;
 
-      for (int y = 0; y < (int)TilePixels; ++y) {
-        int ypixel = round(yspace * (int)TilePixels + y - position[1]);
+      for (int y = 0; y < tilePixels; ++y) {
+        int ypixel = round(yspace * tilePixels + y - position[1] * pixelScale);
         if (ypixel < 0 || ypixel >= imageHeight)
           continue;
 
-        for (int x = 0; x < (int)TilePixels; ++x) {
-          int xpixel = round(xspace * (int)TilePixels + x - position[0]);
+        for (int x = 0; x < tilePixels; ++x) {
+          int xpixel = round(xspace * tilePixels + x - position[0] * pixelScale);
           if (flip)
             xpixel = imageWidth - 1 - xpixel;
 
@@ -80,7 +121,7 @@ List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F posi
             continue;
 
           if (image->get(xpixel, ypixel)[3] > 0)
-            fillRatio += 1.0f / square(TilePixels);
+            fillRatio += 1.0f / square((float)tilePixels);
         }
       }
 
@@ -97,6 +138,7 @@ List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F posi
 }
 
 RectU ImageMetadataDatabase::nonEmptyRegion(AssetPath const& path) const {
+  checkReload();
   MutexLocker locker(m_mutex);
   
   if (auto cached = m_regionCache.ptr(path)) {
@@ -128,6 +170,7 @@ void ImageMetadataDatabase::cleanup() const {
   MutexLocker locker(m_mutex);
 
   m_sizeCache.cleanup();
+  m_pixelScaleCache.cleanup();
   m_spacesCache.cleanup();
   m_regionCache.cleanup();
 }
@@ -253,12 +296,16 @@ Vec2U ImageMetadataDatabase::calculateImageSize(AssetPath const& path) const {
   };
 
   OperationSizeAdjust osa(imageSize);
+  unsigned pixelScale = imagePixelScale(path);
 
   for (auto& directives : path.directives.list())
     directives.loadOperations();
 
   bool complete = path.directives.forEachAbortable([&](auto const& entry, Directives const&) -> bool {
-    entry.operation.call(osa);
+    if (pixelScale == 1)
+      entry.operation.call(osa);
+    else
+      imageOperationForPixelScale(entry.operation, pixelScale).call(osa);
     return !osa.hasError;
   });
 

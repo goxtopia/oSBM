@@ -40,6 +40,8 @@
 #include "StarPlayerInventory.hpp"
 #include "StarCelestialDatabase.hpp"
 #include "StarItem.hpp"
+#include "StarTools.hpp"
+#include "StarTileDamage.hpp"
 #include "StarAiInterface.hpp"
 #include "StarDrawable.hpp"
 #include "StarFireableItem.hpp"
@@ -482,6 +484,56 @@ bool MainInterface::handleInputEvent(InputEvent const& event) {
   return captured;
 }
 
+bool MainInterface::canTouchMine(Vec2F const& screenPosition) const {
+  auto world = m_client->worldClient();
+  auto player = m_client->mainPlayer();
+  if (!world || !world->inWorld() || !player || !player->inWorld()
+      || m_client->paused() || !player->canUseTool() || inputFocus()
+      || m_actionWheelActive || windowsOpen()
+      || m_paneManager.topPane({PaneLayer::ModalWindow})
+      || (m_cinematicOverlay && !m_cinematicOverlay->completed())
+      || player->inventory()->swapSlotItem())
+    return false;
+
+  // Do not turn a HUD click into a tool switch. Pane hit tests use interface
+  // units, while the main-bar polygons and camera use render-canvas pixels.
+  if (m_paneManager.getPaneAt(Vec2I(screenPosition / interfaceScale()))
+      || overButton(m_config->mainBarPoly, screenPosition))
+    return false;
+
+  auto tool = as<BeamMiningTool>(player->essentialItem(EssentialItem::BeamAxe));
+  if (!tool)
+    return false;
+  Vec2F worldPosition = m_worldPainter->camera().screenToWorld(screenPosition);
+  Vec2I tilePosition = Vec2I::floor(worldPosition);
+  if (!isRealMaterial(world->material(tilePosition, TileLayer::Foreground))
+      || world->isTileProtected(tilePosition)
+      || (!player->isAdmin() && world->geometry().diff(centerOfTile(worldPosition), player->position()).magnitude() >= player->beamGunRadius()))
+    return false;
+
+  // Match the manipulator's actual brush, including upgrades. Protect nearby
+  // furniture/plants too: a clear target alone does not make a large brush safe.
+  int radius = (int)tool->instanceValue(player->shifting() ? "altBlockRadius" : "blockRadius", 1).toFloat();
+  for (auto pos : tileAreaBrush(radius, worldPosition, true)) {
+    if (!world->entitiesAtTile(pos).empty())
+      return false;
+    for (auto const& entity : world->entityQuery(RectF::withSize(Vec2F(pos), Vec2F::filled(1)))) {
+      EntityType type = entity->entityType();
+      if (entity != player && type != EntityType::ItemDrop && type != EntityType::Projectile && type != EntityType::Stagehand)
+        return false;
+    }
+  }
+  return true;
+}
+
+void MainInterface::setTouchMiningTarget(Maybe<Vec2F> screenPosition) {
+  m_touchMiningTarget = std::move(screenPosition);
+  if (!m_touchMiningTarget && m_touchMiningFiring) {
+    m_client->mainPlayer()->endPrimaryFire();
+    m_touchMiningFiring = false;
+  }
+}
+
 bool MainInterface::inputFocus() const {
   return (bool)m_paneManager.keyboardCapturedWidget();
 }
@@ -619,8 +671,21 @@ void MainInterface::handleInteractAction(InteractAction interactAction) {
 
 void MainInterface::preUpdate(float) {
   auto player = m_client->mainPlayer();
+  if (m_touchMiningTarget) {
+    if (canTouchMine(*m_touchMiningTarget)) {
+      player->inventory()->selectActionBarLocation(EssentialItem::BeamAxe);
+      player->endAltFire();
+      player->beginPrimaryFire();
+      m_touchMiningFiring = true;
+    } else if (m_touchMiningFiring) {
+      player->endPrimaryFire();
+      m_touchMiningFiring = false;
+    }
+  }
   if (!m_client->paused()) {
-    if (m_autoLockActive && m_autoLockEnabled && m_lockedTargetEntityId != NullEntityId) {
+    if (m_touchMiningTarget) {
+      player->aim(m_worldPainter->camera().screenToWorld(*m_touchMiningTarget));
+    } else if (m_autoLockActive && m_autoLockEnabled && m_lockedTargetEntityId != NullEntityId) {
       if (auto world = m_client->worldClient()) {
         if (auto target = world->entity(m_lockedTargetEntityId)) {
           Vec2F targetWorldPos = target->position() + target->metaBoundBox().center();

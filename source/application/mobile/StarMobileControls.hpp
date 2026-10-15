@@ -8,6 +8,7 @@
 #include "SDL3/SDL.h"
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -60,6 +61,10 @@ struct MobileTouchAction {
 struct MobileTouchConfig {
   bool enabled = true;
   bool directTouchGestures = true;
+  bool jumpGraceEnabled = true;
+  float jumpGraceTime = 0.12f;
+  bool miningAssistEnabled = true;
+  float miningHoldTime = 0.45f;
   DirectTouchGestureMode directTouchGestureMode = DirectTouchGestureMode::Touchscreen;
   // What single-finger and two-finger direct touch gestures do, independent
   // of the touch overlay's configured buttons. Defaults match the
@@ -210,6 +215,7 @@ public:
   ~MobileTouchInputAdapter();
 
   void setConfig(MobileTouchConfig config);
+  void setMiningCallbacks(std::function<bool(Vec2F const&)> canMine, std::function<void(Maybe<Vec2F>)> setTarget);
   void setGyroAvailable(bool available);
   void setElements(std::vector<MobileTouchElement> elements);
   void beginFrame();

@@ -15,9 +15,9 @@ Drawable::ImagePart& Drawable::ImagePart::addDirectives(Directives const& direct
 
   if (keepImageCenterPosition) {
     auto imageMetadata = Root::singleton().imageMetadataDatabase();
-    Vec2F imageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F imageSize = imageMetadata->logicalImageSize(image);
     image.directives += directives;
-    Vec2F newImageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F newImageSize = imageMetadata->logicalImageSize(image);
 
     // If we are trying to maintain the image center, PRE translate the image by
     // the change in size / 2
@@ -35,10 +35,10 @@ Drawable::ImagePart& Drawable::ImagePart::addDirectivesGroup(DirectivesGroup con
 
   if (keepImageCenterPosition) {
     auto imageMetadata = Root::singleton().imageMetadataDatabase();
-    Vec2F imageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F imageSize = imageMetadata->logicalImageSize(image);
     for (Directives const& directives : directivesGroup.list())
       image.directives += directives;
-    Vec2F newImageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F newImageSize = imageMetadata->logicalImageSize(image);
 
     // If we are trying to maintain the image center, PRE translate the image by
     // the change in size / 2
@@ -54,9 +54,9 @@ Drawable::ImagePart& Drawable::ImagePart::addDirectivesGroup(DirectivesGroup con
 Drawable::ImagePart& Drawable::ImagePart::removeDirectives(bool keepImageCenterPosition) {
   if (keepImageCenterPosition) {
     auto imageMetadata = Root::singleton().imageMetadataDatabase();
-    Vec2F imageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F imageSize = imageMetadata->logicalImageSize(image);
     image.directives.clear();
-    Vec2F newImageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F newImageSize = imageMetadata->logicalImageSize(image);
 
     // If we are trying to maintain the image center, PRE translate the image by
     // the change in size / 2
@@ -91,7 +91,7 @@ Drawable Drawable::makeImage(AssetPath image, float pixelSize, bool centered, Ve
   Mat3F transformation = Mat3F::identity();
   if (centered) {
     auto imageMetadata = Root::singleton().imageMetadataDatabase();
-    Vec2F imageSize = Vec2F(imageMetadata->imageSize(image));
+    Vec2F imageSize = imageMetadata->logicalImageSize(image);
     transformation.translate(-imageSize / 2);
   }
 
@@ -121,7 +121,7 @@ Drawable::Drawable(Json const& json) {
     } else {
       if (json.getBool("centered", true)) {
         auto imageMetadata = Root::singleton().imageMetadataDatabase();
-        Vec2F imageSize = Vec2F(imageMetadata->imageSize(imageString));
+        Vec2F imageSize = imageMetadata->logicalImageSize(imageString);
         transformation.translate(-imageSize / 2);
       }
       if (auto rotation = json.optFloat("rotation"))
@@ -234,6 +234,9 @@ RectF Drawable::boundBox(bool cropImages) const {
     }
 
     if (!imageRegion.isNull()) {
+      unsigned pixelScale = imageMetadata->imagePixelScale(image->image);
+      if (pixelScale != 1)
+        imageRegion = imageRegion.scaled(1.0f / pixelScale);
       boundBox.combine(image->transformation.transformVec2(Vec2F(imageRegion.xMin(), imageRegion.yMin())));
       boundBox.combine(image->transformation.transformVec2(Vec2F(imageRegion.xMax(), imageRegion.yMin())));
       boundBox.combine(image->transformation.transformVec2(Vec2F(imageRegion.xMin(), imageRegion.yMax())));

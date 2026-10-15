@@ -10,6 +10,8 @@
 #include "StarJsonPatch.hpp"
 #include "StarIterator.hpp"
 #include "StarImageProcessing.hpp"
+#include "StarImageScaling.hpp"
+#include "StarImagePixelScale.hpp"
 #include "StarLogging.hpp"
 #include "StarRandom.hpp"
 #include "StarFont.hpp"
@@ -189,11 +191,14 @@ Maybe<RectU> FramesSpecification::getRect(String const& frame) const {
 }
 
 Json FramesSpecification::toJson() const {
-  return JsonObject{
+  Json result = JsonObject{
     {"aliases", jsonFromMap(aliases)},
     {"frames", jsonFromMapV(frames, jsonFromRectU)},
     {"file", framesFile}
   };
+  if (pixelScale != 1)
+    result = result.set("pixelScale", pixelScale);
+  return result;
 }
 
 Assets::Assets(Settings settings, StringList assetSources)
@@ -834,6 +839,10 @@ FramesSpecification Assets::parseFramesSpecification(Json const& frameConfig, St
   FramesSpecification framesSpecification;
 
   framesSpecification.framesFile = std::move(path);
+  double pixelScale = frameConfig.getDouble("pixelScale", 1.0);
+  if (!validImagePixelScale(pixelScale))
+    throw AssetException::format("Image pixelScale in '{}' must be 1, 2 or 4", framesSpecification.framesFile);
+  framesSpecification.pixelScale = (unsigned)pixelScale;
 
   if (frameConfig.contains("frameList")) {
     for (auto const& pair : frameConfig.get("frameList").toObject()) {
@@ -1427,6 +1436,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
     if (!source)
       return {};
     StringMap<ImageConstPtr> references;
+    StringMap<unsigned> referenceRescales;
     StringList referencePaths;
 
     for (auto& directives : path.directives.list())
@@ -1444,12 +1454,28 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
       if (!refImage)
         return {};
       references[ref] = refImage->image;
+      if (refImage->pixelScale != source->pixelScale)
+        referenceRescales[ref] = refImage->pixelScale;
     }
 
     return unlockDuring([&]() {
       auto newData = make_shared<ImageData>();
-      auto newImage = path.directives.applyNewImage(*source->image, [&](String const& ref) { return references.get(ref).get(); });
+      // Resampling can be substantial for HD masks; keep it outside the
+      // global assets mutex just like the image operations themselves.
+      for (auto const& entry : referenceRescales)
+        references[entry.first] = make_shared<Image>(rescaleImagePixels(*references.get(entry.first), entry.second, source->pixelScale));
+      auto reference = [&](String const& ref) { return references.get(ref).get(); };
+      Image newImage;
+      if (source->pixelScale == 1) {
+        newImage = path.directives.applyNewImage(*source->image, reference);
+      } else {
+        newImage = *source->image;
+        path.directives.forEach([&](auto const& entry, Directives const&) {
+          processImageOperation(imageOperationForPixelScale(entry.operation, source->pixelScale), newImage, reference);
+        });
+      }
       newData->image = make_shared<Image>(std::move(newImage));
+      newData->pixelScale = source->pixelScale;
       return newData;
     });
 
@@ -1469,6 +1495,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
 
       auto newData = make_shared<ImageData>();
       newData->image = imageData->image;
+      newData->pixelScale = imageData->pixelScale;
       newData->alias = true;
       return newData;
 
@@ -1481,6 +1508,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
         // Need to flip frame coordinates because frame configs assume top
         // down image coordinates
         auto newData = make_shared<ImageData>();
+        newData->pixelScale = imageData->pixelScale;
         newData->image = make_shared<Image>(imageData->image->subImage(
             Vec2U(frameRect->xMin(), imageData->image->height() - frameRect->yMax()), frameRect->size()));
         return newData;
@@ -1493,6 +1521,8 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
       return readImage(path.basePath);
     });
     imageData->frames = bestFramesSpecification(path.basePath);
+    if (imageData->frames)
+      imageData->pixelScale = imageData->frames->pixelScale;
 
     return imageData;
   }

@@ -1,3 +1,6 @@
+For mixed 1x/2x/4x clothing sprites and helmet masks, see
+[high-resolution sprites](high-resolution-sprites.md).
+
 ## `bool` statusEffectsInCosmeticSlots
 If true enables the armor to apply its status effects even when in cosmetic slots
 

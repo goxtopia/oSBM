@@ -26,6 +26,10 @@ void Application::windowChanged(WindowMode, Vec2U) {}
 
 void Application::processInput(InputEvent const&) {}
 
+bool Application::canTouchMine(Vec2F const&) const { return false; }
+
+void Application::setTouchMiningTarget(Maybe<Vec2F>) {}
+
 void Application::update() {}
 
 unsigned Application::framesSkipped() const { return 0; }
